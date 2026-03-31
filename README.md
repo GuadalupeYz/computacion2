@@ -1,2 +1,2 @@
-# computacion2
-Trabajos prácticos de Computación 2 - Alumna Guadalupe Yañez
+# Computacion 2
+Trabajos prácticos Computación 2 - Guadalupe Yañez - 2026
