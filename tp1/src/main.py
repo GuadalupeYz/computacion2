@@ -1,5 +1,6 @@
 
 import multiprocessing as mp
+from display import display
 from analizadores.resumen import resumen
 from recolector import recolector
 from agregador import agregador
@@ -26,6 +27,9 @@ def main():
     
     p_recolector.start()
     p_agregador.start()
+
+    p_display = mp.Process(target=display, args=(snapshot,), name='display')
+    p_display.start()
     
     try:
         while True:
@@ -33,6 +37,7 @@ def main():
             print(f"\n=== Snapshot: {len(datos)} procesos ===")
             for p in datos[:5]:
                 print(f"  PID={p['pid']:6}  Estado={p['estado']}  Nombre={p['nombre']}")
+            p_recolector.join()
     except KeyboardInterrupt:
         print("\n[Main] Deteniendo...")
         p_recolector.terminate()
@@ -41,6 +46,8 @@ def main():
         p_agregador.join()
         p_resumen.terminate()
         p_resumen.join()
+        p_display.terminate()
+        p_display.join()
         manager.shutdown()
 
 if __name__ == '__main__':
