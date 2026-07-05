@@ -1,5 +1,6 @@
 
 import multiprocessing as mp
+from analizadores.resumen import resumen
 from recolector import recolector
 from agregador import agregador
 
@@ -15,6 +16,10 @@ def main():
     # Queue para que el recolector mande PIDs a los analizadores
     queue_pids = mp.Queue()
     
+    # Arrancamos analizadores
+    p_resumen = mp.Process(target=resumen, args=(queue_pids, queue_datos), name='resumen')
+    p_resumen.start()
+
     # Arrancamos procesos
     p_recolector = mp.Process(target=recolector, args=(queue_pids,), name='recolector')
     p_agregador = mp.Process(target=agregador, args=(snapshot, lock, queue_datos), name='agregador')
@@ -34,6 +39,8 @@ def main():
         p_agregador.terminate()
         p_recolector.join()
         p_agregador.join()
+        p_resumen.terminate()
+        p_resumen.join()
         manager.shutdown()
 
 if __name__ == '__main__':

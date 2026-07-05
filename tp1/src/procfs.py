@@ -38,3 +38,14 @@ def read_stat(pid):
         return campos
     except (FileNotFoundError, ProcessLookupError, ValueError):
         return None
+    
+def read_cmdline(pid):
+    """Lee /proc/<pid>/cmdline y devuelve el comando completo como string."""
+    try:
+        with open(f'/proc/{pid}/cmdline', 'r') as f:
+            contenido = f.read()
+        if not contenido:
+            return '[proceso kernel]'
+        return contenido.replace('\x00', ' ').strip()
+    except (FileNotFoundError, ProcessLookupError):
+        return None
