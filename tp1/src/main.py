@@ -4,6 +4,8 @@ from analizadores.resumen import resumen
 from analizadores.sistema import sistema
 from recolector import recolector
 from agregador import agregador
+from analizadores.memoria import memoria
+
 
 def main():
     manager = mp.Manager()
@@ -18,7 +20,9 @@ def main():
     p_recolector = mp.Process(target=recolector, args=(queue_pids,),             name='recolector')
     p_agregador  = mp.Process(target=agregador,  args=(snapshot, lock, queue_datos), name='agregador')
     p_display    = mp.Process(target=display,    args=(snapshot,),               name='display')
-    
+    p_memoria    = mp.Process(target=memoria, args=(queue_pids, queue_datos), name='memoria')
+
+    p_memoria.start()
     p_resumen.start()
     p_sistema.start()
     p_recolector.start()
@@ -30,7 +34,7 @@ def main():
     except KeyboardInterrupt:
         print("\n[Main] Deteniendo...")
     finally:
-        for p in [p_resumen, p_sistema, p_recolector, p_agregador, p_display]:
+        for p in [p_resumen, p_sistema, p_recolector, p_agregador, p_display, p_memoria]:
             p.terminate()
             p.join()
         manager.shutdown()
