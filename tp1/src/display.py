@@ -35,6 +35,7 @@ def thread_teclado(queue_teclas):
     vistas = {
         '1': 'resumen', 'r': 'resumen',
         '2': 'memoria', 'm': 'memoria',
+        '3': 'fds', 'f': 'fds',
         '7': 'sistema', 'g': 'sistema',
     }
     while True:
@@ -85,7 +86,7 @@ def construir_tabla(snapshot):
         tabla.add_row("Mem Total",  str(datos.get('mem_total', '?')) + " kB")
         tabla.add_row("Mem Free",   str(datos.get('mem_free',  '?')) + " kB")
         tabla.add_row("Mem Cached", str(datos.get('mem_cached','?')) + " kB")
-    
+
     elif vista_activa == 'memoria':
         tabla = Table(title="Monitor de Procesos — Memoria")
         tabla.add_column("PID",     style="cyan",   width=8)
@@ -97,16 +98,41 @@ def construir_tabla(snapshot):
         tabla.add_column("Stack kB",style="blue",   width=10)
 
         for pid, info in list(datos.items())[:30]:
-          mapas = info.get('mapas', {})
-          tabla.add_row(
-             str(info['pid']),
-             str(info['nombre'])[:15],
-             str(info['vm_rss']),
-             str(info['vm_size']),
-             str(info['vm_swap']),
-             str(mapas.get('heap',  0)),
-             str(mapas.get('stack', 0)),
-        )
+            mapas = info.get('mapas', {})
+            tabla.add_row(
+                str(info['pid']),
+                str(info['nombre'])[:15],
+                str(info['vm_rss']),
+                str(info['vm_size']),
+                str(info['vm_swap']),
+                str(mapas.get('heap',  0)),
+                str(mapas.get('stack', 0)),
+            )
+
+    elif vista_activa == 'fds':
+        tabla = Table(title="Monitor de Procesos — File Descriptors")
+        tabla.add_column("PID",      style="cyan",   width=8)
+        tabla.add_column("Nombre",   style="white",  width=15)
+        tabla.add_column("Total FDs",style="yellow", width=10)
+        tabla.add_column("FD",       style="blue",   width=6)
+        tabla.add_column("Tipo",     style="green",  width=8)
+        tabla.add_column("Destino",  style="white")
+
+        for pid, info in list(datos.items())[:15]:
+            lista = info.get('fds', [])
+            if not lista:
+                tabla.add_row(str(pid), info['nombre'][:15], str(info['total']), '-', '-', '-')
+                continue
+            primer = lista[0]
+            tabla.add_row(
+                str(pid),
+                info['nombre'][:15],
+                str(info['total']),
+                str(primer['fd']),
+                str(primer['tipo']),
+                str(primer['destino'])[:40],
+            )
+
     else:
         tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
 
