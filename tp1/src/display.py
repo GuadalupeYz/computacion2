@@ -1,35 +1,51 @@
+
 import time
 import threading
 import multiprocessing as mp
+import os
+import termios
+import tty
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
 
 console = Console()
-
-# Variable compartida entre threads
 vista_activa = 'resumen'
 
+def proceso_teclado(queue_teclas):
+    """Proceso separado que lee teclas en modo raw y las manda por queue."""
+    fd = os.open('/dev/tty', os.O_RDONLY)
+    old = termios.tcgetattr(fd)
+    try:
+        tty.setraw(fd)
+        while True:
+            tecla = os.read(fd, 1).decode('utf-8', errors='ignore')
+            queue_teclas.put(tecla)
+            if tecla in ('q', '\x03', '\x04'):
+                break
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old)
+        os.close(fd)
 
-def leer_teclado():
-    """Thread que escucha teclas y cambia la vista activa."""
+def thread_teclado(queue_teclas):
+    """Thread que consume teclas de la queue y actualiza vista_activa."""
     global vista_activa
     vistas = {
         '1': 'resumen', 'r': 'resumen',
         '2': 'memoria', 'm': 'memoria',
         '7': 'sistema', 'g': 'sistema',
     }
-    with open('/dev/tty') as tty:
-        while True:
-            tecla = tty.read(1)
+    while True:
+        try:
+            tecla = queue_teclas.get(timeout=1.0)
             if tecla in vistas:
                 vista_activa = vistas[tecla]
-            elif tecla == 'q':
+            elif tecla in ('q', '\x03', '\x04'):
                 break
-
+        except Exception:
+            continue
 
 def construir_tabla(snapshot):
-    """Construye la tabla rich según la vista activa."""
     global vista_activa
 
     if vista_activa not in snapshot:
@@ -56,17 +72,34 @@ def construir_tabla(snapshot):
                 str(info['threads']),
                 str(info['comando'])[:50],
             )
+
+    elif vista_activa == 'sistema':
+        tabla = Table(title="Monitor de Procesos — Sistema Global")
+        tabla.add_column("Métrica", style="cyan", width=20)
+        tabla.add_column("Valor",   style="green")
+        tabla.add_row("CPU %",      str(datos.get('cpu_pct', '?')) + "%")
+        tabla.add_row("Load 1min",  str(datos.get('loadavg', {}).get('load_1', '?')))
+        tabla.add_row("Load 5min",  str(datos.get('loadavg', {}).get('load_5', '?')))
+        tabla.add_row("Mem Total",  str(datos.get('mem_total', '?')) + " kB")
+        tabla.add_row("Mem Free",   str(datos.get('mem_free',  '?')) + " kB")
+        tabla.add_row("Mem Cached", str(datos.get('mem_cached','?')) + " kB")
     else:
         tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
 
     return tabla
 
-
 def display(snapshot, intervalo=2.0):
-    """Proceso display: muestra el snapshot en pantalla."""
     print(f"[Display] Iniciado con PID {mp.current_process().pid}")
 
-    t_teclado = threading.Thread(target=leer_teclado, daemon=True)
+    # Queue para pasar teclas entre proceso y thread
+    queue_teclas = mp.Queue()
+
+    # Proceso separado para leer teclado en modo raw
+    p_teclado = mp.Process(target=proceso_teclado, args=(queue_teclas,), daemon=True)
+    p_teclado.start()
+
+    # Thread que consume las teclas y actualiza vista_activa
+    t_teclado = threading.Thread(target=thread_teclado, args=(queue_teclas,), daemon=True)
     t_teclado.start()
 
     with Live(console=console, refresh_per_second=1) as live:
