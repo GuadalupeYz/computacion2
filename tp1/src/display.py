@@ -37,6 +37,7 @@ def thread_teclado(queue_teclas):
         '2': 'memoria', 'm': 'memoria',
         '3': 'fds', 'f': 'fds',
         '4': 'threads', 't': 'threads',
+        '5': 'senales', 's': 'senales',
         '7': 'sistema', 'g': 'sistema',
     }
     while True:
@@ -157,9 +158,25 @@ def construir_tabla(snapshot):
                 str(t['vol_ctx']),
                 str(t['nonvol_ctx']),
             )
+    elif vista_activa == 'senales':
+         tabla = Table(title="Monitor de Procesos — Señales")
+         tabla.add_column("PID",        style="cyan",   width=8)
+         tabla.add_column("Nombre",     style="white",  width=15)
+         tabla.add_column("Bloqueadas", style="red",    width=20)
+         tabla.add_column("Ignoradas",  style="yellow", width=20)
+         tabla.add_column("Capturadas", style="green",  width=20)
 
+         for pid, info in list(datos.items())[:20]:
+             tabla.add_row(
+                 str(pid),
+                 info['nombre'][:15],
+                 ', '.join(info['bloqueadas'])[:20]  or '-',
+                 ', '.join(info['ignoradas'])[:20]   or '-',
+                 ', '.join(info['capturadas'])[:20]  or '-',
+             )
+         
     else:
-        tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
+         tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
 
     return tabla
 
