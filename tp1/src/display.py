@@ -38,6 +38,7 @@ def thread_teclado(queue_teclas):
         '3': 'fds', 'f': 'fds',
         '4': 'threads', 't': 'threads',
         '5': 'senales', 's': 'senales',
+        '6': 'scheduling', 'p': 'scheduling',
         '7': 'sistema', 'g': 'sistema',
     }
     while True:
@@ -174,7 +175,28 @@ def construir_tabla(snapshot):
                  ', '.join(info['ignoradas'])[:20]   or '-',
                  ', '.join(info['capturadas'])[:20]  or '-',
              )
-         
+
+    elif vista_activa == 'scheduling':
+         tabla = Table(title="Monitor de Procesos — Scheduling")
+         tabla.add_column("PID",      style="cyan",   width=8)
+         tabla.add_column("Nombre",   style="white",  width=15)
+         tabla.add_column("Nice",     style="yellow", width=6)
+         tabla.add_column("Política", style="green",  width=10)
+         tabla.add_column("CPU",      style="blue",   width=8)
+         tabla.add_column("Vol ctx",  style="yellow", width=10)
+         tabla.add_column("NoVol ctx",style="red",    width=10)
+
+         for pid, info in list(datos.items())[:25]:
+             tabla.add_row(
+                 str(pid),
+                 info['nombre'][:15],
+                 str(info['nice']),
+                 str(info['politica']),
+                 str(info['cpu_affinidad']),
+                 str(info['vol_ctx']),
+                 str(info['nonvol_ctx']),
+             )
+     
     else:
          tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
 

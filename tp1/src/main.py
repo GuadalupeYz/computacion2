@@ -8,6 +8,7 @@ from analizadores.memoria import memoria
 from analizadores.threads import threads
 from analizadores.fds import fds
 from analizadores.senales import senales
+from analizadores.scheduling import scheduling
 
 def main():
     manager = mp.Manager()
@@ -26,7 +27,9 @@ def main():
     p_fds = mp.Process(target=fds, args=(queue_pids, queue_datos), name='fds')
     p_threads = mp.Process(target=threads, args=(queue_pids, queue_datos), name='threads')
     p_senales = mp.Process(target=senales, args=(queue_pids, queue_datos), name='senales')
+    p_scheduling = mp.Process(target=scheduling, args=(queue_pids, queue_datos), name='scheduling')
     
+    p_scheduling.start()
     p_senales.start()
     p_threads.start()
     p_fds.start()             
@@ -42,7 +45,7 @@ def main():
     except KeyboardInterrupt:
         print("\n[Main] Deteniendo...")
     finally:
-        for p in [p_resumen, p_sistema, p_recolector, p_agregador, p_display, p_memoria, p_fds, p_threads, p_senales]:
+        for p in [p_resumen, p_sistema, p_recolector, p_agregador, p_display, p_memoria, p_fds, p_threads, p_senales, p_scheduling]:
             p.terminate()
             p.join()
         manager.shutdown()
