@@ -36,6 +36,7 @@ def thread_teclado(queue_teclas):
         '1': 'resumen', 'r': 'resumen',
         '2': 'memoria', 'm': 'memoria',
         '3': 'fds', 'f': 'fds',
+        '4': 'threads', 't': 'threads',
         '7': 'sistema', 'g': 'sistema',
     }
     while True:
@@ -132,6 +133,30 @@ def construir_tabla(snapshot):
                 str(primer['tipo']),
                 str(primer['destino'])[:40],
             )
+    
+    elif vista_activa == 'threads':
+        tabla = Table(title="Monitor de Procesos — Threads")
+        tabla.add_column("PID",     style="cyan",   width=8)
+        tabla.add_column("Nombre",  style="white",  width=15)
+        tabla.add_column("TID",     style="blue",   width=8)
+        tabla.add_column("Estado",  style="green",  width=8)
+        tabla.add_column("Vol ctx", style="yellow", width=10)
+        tabla.add_column("NoVol ctx",style="red",   width=10)
+
+        for pid, info in list(datos.items())[:15]:
+            lista = info.get('threads', [])
+            if not lista:
+               tabla.add_row(str(pid), info['nombre'][:15], '-', '-', '-', '-')
+               continue
+        for t in lista[:2]:  # máximo 2 threads por proceso
+            tabla.add_row(
+                str(pid),
+                info['nombre'][:15],
+                str(t['tid']),
+                str(t['estado']),
+                str(t['vol_ctx']),
+                str(t['nonvol_ctx']),
+            )
 
     else:
         tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
@@ -154,6 +179,9 @@ def display(snapshot, intervalo=2.0):
 
     with Live(console=console, refresh_per_second=1) as live:
         while True:
-            tabla = construir_tabla(snapshot)
-            live.update(tabla)
+            try:
+                tabla = construir_tabla(snapshot)
+                live.update(tabla)
+            except Exception as e:
+                pass
             time.sleep(intervalo)
