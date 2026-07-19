@@ -9,6 +9,7 @@ from analizadores.threads import threads
 from analizadores.fds import fds
 from analizadores.senales import senales
 from analizadores.scheduling import scheduling
+from seniales import configurar_señales
 
 def main():
     manager = mp.Manager()
@@ -40,6 +41,12 @@ def main():
     p_agregador.start()
     p_display.start()
     
+    todos = [p_resumen, p_sistema, p_recolector, p_agregador, 
+         p_display, p_memoria, p_fds, p_threads, 
+         p_senales, p_scheduling]
+
+    configurar_señales(snapshot, todos)
+
     try:
         p_display.join()  # esperamos al display, si cierra, cerramos todo
     except KeyboardInterrupt:
