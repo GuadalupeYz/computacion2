@@ -1,9 +1,10 @@
 import time
 import multiprocessing as mp
+import sys
 from procfs import get_pids, read_status, read_stat
 
 def recolector(queues_pids, intervalo=2.0):
-    print(f"[Recolector] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Recolector] Iniciado con PID {mp.current_process().pid}", file=sys.stderr)
     
     while True:
         pids_info = []

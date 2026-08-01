@@ -1,6 +1,7 @@
 
 import time
 import multiprocessing as mp
+import sys
 from procfs import read_status, read_stat, read_cmdline
 
 def resumen(queue_pids, queue_datos, intervalo=2.0):
@@ -8,7 +9,7 @@ def resumen(queue_pids, queue_datos, intervalo=2.0):
     Analizador de resumen: lee datos básicos de cada PID
     y los manda al agregador via queue_datos.
     """
-    print(f"[Resumen] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Resumen] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
 
     while True:
         try:

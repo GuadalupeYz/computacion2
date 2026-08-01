@@ -1,6 +1,7 @@
 
 import time
 import multiprocessing as mp
+import sys
 from procfs import read_status
 
 # Mapa de número de señal a nombre
@@ -30,7 +31,7 @@ def decodificar_mascara(hex_str):
 
 
 def senales(queue_pids, queue_datos, intervalo=10.0):
-    print(f"[Señales] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Señales] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
 
     while True:
         try:

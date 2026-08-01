@@ -1,5 +1,6 @@
 
 import time
+import sys
 import multiprocessing as mp
 
 def agregador(snapshot, lock, queue_datos, intervalo=1.0):
@@ -7,7 +8,7 @@ def agregador(snapshot, lock, queue_datos, intervalo=1.0):
     Proceso agregador: recibe datos de los analizadores por queue
     y los escribe en el snapshot global (Manager.dict compartido).
     """
-    print(f"[Agregador] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Agregador] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
     
     while True:
         try:

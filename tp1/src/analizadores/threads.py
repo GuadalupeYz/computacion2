@@ -1,6 +1,7 @@
 
 import os
 import time
+import sys
 import multiprocessing as mp
 from procfs import read_stat
 
@@ -51,7 +52,7 @@ def leer_threads(pid):
 
 
 def threads(queue_pids, queue_datos, intervalo=2.0):
-    print(f"[Threads] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Threads] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
 
     while True:
         try:

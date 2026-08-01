@@ -11,6 +11,8 @@ from recolector import recolector
 from agregador import agregador
 from seniales import configurar_señales
 
+import time as _time
+
 def main():
     manager = mp.Manager()
     snapshot = manager.dict()
@@ -53,6 +55,8 @@ def main():
 
     for p in todos:
         p.start()
+
+    _time.sleep(3)
 
     configurar_señales(snapshot, todos)
 

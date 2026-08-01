@@ -1,5 +1,6 @@
 
 import time
+import sys
 import multiprocessing as mp
 from procfs import read_status, read_stat
 
@@ -38,7 +39,7 @@ def leer_maps(pid):
 
 
 def memoria(queue_pids, queue_datos, intervalo=3.0):
-    print(f"[Memoria] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Memoria] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
 
     while True:
         try:

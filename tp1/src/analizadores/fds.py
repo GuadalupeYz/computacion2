@@ -1,6 +1,7 @@
 
 import os
 import time
+import sys
 import multiprocessing as mp
 
 
@@ -43,7 +44,7 @@ def leer_fds(pid):
 
 
 def fds(queue_pids, queue_datos, intervalo=5.0):
-    print(f"[FDs] Iniciado con PID {mp.current_process().pid}")
+    print(f"[FDs] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
 
     while True:
         try:

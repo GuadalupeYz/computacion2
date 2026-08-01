@@ -1,6 +1,7 @@
 
 import time
 import multiprocessing as mp
+import sys
 from procfs import read_status, read_stat
 
 POLITICAS = {
@@ -13,7 +14,7 @@ POLITICAS = {
 }
 
 def scheduling(queue_pids, queue_datos, intervalo=10.0):
-    print(f"[Scheduling] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Scheduling] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
 
     while True:
         try:

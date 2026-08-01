@@ -1,7 +1,7 @@
 
 import time
 import multiprocessing as mp
-
+import sys
 
 def leer_loadavg():
     with open('/proc/loadavg', 'r') as f:
@@ -63,7 +63,7 @@ def calcular_cpu_pct(anterior, actual):
 
 
 def sistema(queue_datos, intervalo=2.0):
-    print(f"[Sistema] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Sistema] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
     
     cpu_anterior = None
     
