@@ -7,6 +7,11 @@ from rich.table import Table
 from rich.live import Live
 import threading
 
+#Teclas 1 a 7 y r, m, f, t, s, p, g — ¿cambian las vistas?
+#h o ? — ¿aparece la ayuda? ¿Podés salir con h de nuevo?
+#+ y - — ¿cambia el intervalo visible en el título?
+#q — ¿cierra limpiamente?
+
 _lock_estado = threading.Lock()
 console = Console()
 vista_activa = 'resumen'
@@ -35,14 +40,19 @@ def leer_teclado():
         tty.setcbreak(tty_fd)
         while True:
             tecla = os.read(tty_fd, 1).decode(errors='replace')
-            print(f"[TECLADO] recibí: {repr(tecla)}", flush=True)
+            #print(f"[TECLADO] recibí: {repr(tecla)}", flush=True)
+            print(f"[TECLADO] recibí: {repr(tecla)} ord={ord(tecla) if len(tecla)==1 else 'multi'}", flush=True) 
+
             if tecla in vistas:
                 vista_activa = vistas[tecla]
-            elif tecla == '+':
-                intervalo_actual = min(intervalo_actual + 0.5, 30.0)
+            #elif tecla == '+':
+               # intervalo_actual = min(intervalo_actual + 0.5, 30.0)
             elif tecla == '-':
                 minimo = intervalos_minimos.get(vista_activa, 0.5)
                 intervalo_actual = max(intervalo_actual - 0.5, minimo)
+            elif tecla == '+': #nuevo 
+                intervalo_actual = min(intervalo_actual + 0.5, 30.0)
+                print(f"[TECLADO] intervalo ahora: {intervalo_actual}", flush=True)
             elif tecla in ('h', '?'):
                 mostrar_ayuda = not mostrar_ayuda
             elif tecla == 'q':
@@ -83,7 +93,7 @@ def construir_tabla(snapshot):
     datos = snapshot[vista_activa]
 
     if vista_activa == 'resumen':
-        tabla = Table(title="Monitor de Procesos — Resumen")
+        tabla = Table(title=f"Monitor de Procesos — Resumen [intervalo: {intervalo_actual:.1f}s]")   
         tabla.add_column("PID",     style="cyan",   width=8)
         tabla.add_column("PPID",    style="blue",   width=8)
         tabla.add_column("UID",     style="blue",   width=6)
@@ -101,7 +111,7 @@ def construir_tabla(snapshot):
             )
 
     elif vista_activa == 'sistema':
-        tabla = Table(title="Monitor de Procesos — Sistema Global")
+        tabla = Table(title=f"Monitor de Procesos — Sistema Global [intervalo: {intervalo_actual:.1f}s]")    
         tabla.add_column("Métrica", style="cyan",  width=20)
         tabla.add_column("Valor",   style="green")
         tabla.add_row("CPU %",      str(datos.get('cpu_pct', '?')) + "%")
@@ -112,7 +122,7 @@ def construir_tabla(snapshot):
         tabla.add_row("Mem Cached", str(datos.get('mem_cached','?')) + " kB")
 
     elif vista_activa == 'memoria':
-        tabla = Table(title="Monitor de Procesos — Memoria")
+        tabla = Table(title=f"Monitor de Procesos — Memoria [intervalo: {intervalo_actual:.1f}s]")   
         tabla.add_column("PID",      style="cyan",   width=8)
         tabla.add_column("Nombre",   style="white",  width=15)
         tabla.add_column("VmRSS",    style="green",  width=12)
@@ -133,7 +143,7 @@ def construir_tabla(snapshot):
             )
 
     elif vista_activa == 'fds':
-        tabla = Table(title="Monitor de Procesos — File Descriptors")
+        tabla = Table(title=f"Monitor de Procesos — File Descriptors [intervalo: {intervalo_actual:.1f}s]")  
         tabla.add_column("PID",       style="cyan",   width=8)
         tabla.add_column("Nombre",    style="white",  width=15)
         tabla.add_column("Total FDs", style="yellow", width=10)
@@ -156,7 +166,7 @@ def construir_tabla(snapshot):
             )
 
     elif vista_activa == 'threads':
-        tabla = Table(title="Monitor de Procesos — Threads")
+        tabla = Table(title=f"Monitor de Procesos — Threads  [intervalo: {intervalo_actual:.1f}s]")
         tabla.add_column("PID",       style="cyan",   width=8)
         tabla.add_column("Nombre",    style="white",  width=15)
         tabla.add_column("TID",       style="blue",   width=8)
@@ -179,7 +189,7 @@ def construir_tabla(snapshot):
                 )
 
     elif vista_activa == 'senales':
-        tabla = Table(title="Monitor de Procesos — Señales")
+        tabla = Table(title=f"Monitor de Procesos — Señales  [intervalo: {intervalo_actual:.1f}s]")
         tabla.add_column("PID",        style="cyan",   width=8)
         tabla.add_column("Nombre",     style="white",  width=15)
         tabla.add_column("Bloqueadas", style="red",    width=20)
@@ -195,7 +205,7 @@ def construir_tabla(snapshot):
             )
 
     elif vista_activa == 'scheduling':
-        tabla = Table(title="Monitor de Procesos — Scheduling")
+        tabla = Table(title=f"Monitor de Procesos — Scheduling  [intervalo: {intervalo_actual:.1f}s]")
         tabla.add_column("PID",       style="cyan",   width=8)
         tabla.add_column("Nombre",    style="white",  width=15)
         tabla.add_column("Nice",      style="yellow", width=6)
@@ -218,6 +228,8 @@ def construir_tabla(snapshot):
     return tabla
 
 def display(snapshot, intervalo=2.0):
+    global intervalo_actual
+    intervalo_actual = intervalo
     print(f"[Display] Iniciado con PID {mp.current_process().pid}")
 
     t_teclado = threading.Thread(target=leer_teclado, daemon=True)
@@ -230,4 +242,4 @@ def display(snapshot, intervalo=2.0):
                 live.update(tabla)
             except Exception:
                 pass
-            time.sleep(intervalo)
+            time.sleep(intervalo_actual)  # usa la variable global

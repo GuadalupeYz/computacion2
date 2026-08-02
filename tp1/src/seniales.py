@@ -4,7 +4,6 @@ import json
 import os
 import time
 
-
 def configurar_señales(snapshot, procesos):
     """
     Registra los handlers para las señales que recibe el monitor.
@@ -23,15 +22,20 @@ def configurar_señales(snapshot, procesos):
 
     def handler_dump(signum, frame):
         """SIGUSR1: dump del snapshot a JSON."""
-        timestamp = int(time.time())
-        nombre    = f'dump_{timestamp}.json'
         try:
-            datos = dict(snapshot)
+            import time, json
+            timestamp = int(time.time())
+            nombre = f'/app/dump_{timestamp}.json'
+            datos = {}
+            for k in list(snapshot.keys()):
+               try:
+                datos[k] = dict(snapshot[k]) if hasattr(snapshot[k], 'keys') else snapshot[k]
+               except:
+                datos[k] = str(snapshot[k])
             with open(nombre, 'w') as f:
-                json.dump(datos, f, indent=2, default=str)
-            print(f"[Señales] Dump guardado en {nombre}")
+               json.dump(datos, f, indent=2, default=str)
         except Exception as e:
-            print(f"[Señales] Error al hacer dump: {e}")
+            pass
 
     def handler_verbose(signum, frame):
         """SIGUSR2: toggle modo verbose."""

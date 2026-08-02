@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  monitor:
+    build: .
+    stdin_open: true
+    tty: true
+    pid: "host"
+    privileged: true
+    environment:
+      - TERM=xterm-256color
+    volumes:
+      - /proc:/proc:ro
