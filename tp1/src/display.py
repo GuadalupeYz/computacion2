@@ -15,10 +15,13 @@ indice_seleccionado = 0
 proceso_pinned = None
 filtro_nombre = ''
 filtro_usuario = ''
+en_filtro = False
+ordenes = ['pid', 'nombre'] 
+orden_actual = 'pid'
 
 def leer_teclado():
     global vista_activa, intervalo_actual, mostrar_ayuda
-    global orden_actual, indice_seleccionado, proceso_pinned
+    global ordenes, orden_actual, indice_seleccionado, proceso_pinned
     global filtro_nombre, filtro_usuario
 
     vistas = {
@@ -34,7 +37,6 @@ def leer_teclado():
         'resumen': 0.5, 'memoria': 1.0, 'fds': 2.0,
         'threads': 0.5, 'senales': 5.0, 'scheduling': 5.0, 'sistema': 1.0
     }
-    ordenes = ['pid', 'rss']
 
     try:
         tty_fd = os.open('/dev/tty', os.O_RDONLY)
@@ -58,11 +60,19 @@ def leer_teclado():
                 orden_actual = ordenes[(idx + 1) % len(ordenes)]
                 indice_seleccionado = 0
             elif tecla == '/':
-                filtro_nombre = _leer_filtro(tty_fd, 'Filtrar por nombre: ')
-                indice_seleccionado = 0
+                 nuevo = _leer_filtro(tty_fd, 'Filtrar por nombre (Enter=aplicar, Esc=limpiar): ')
+                 if nuevo == '__LIMPIAR__':
+                     filtro_nombre = ''
+                 else:
+                     filtro_nombre = nuevo
+                 indice_seleccionado = 0
             elif tecla == 'u':
-                filtro_usuario = _leer_filtro(tty_fd, 'Filtrar por usuario: ')
-                indice_seleccionado = 0
+                 nuevo = _leer_filtro(tty_fd, 'Filtrar por usuario (Enter=aplicar, Esc=limpiar): ')
+                 if nuevo == '__LIMPIAR__':
+                     filtro_usuario = ''
+                 else:
+                     filtro_usuario = nuevo
+                 indice_seleccionado = 0
             elif tecla == '\x1b':
                 b1 = os.read(tty_fd, 1).decode(errors='replace')
                 b2 = os.read(tty_fd, 1).decode(errors='replace')
@@ -87,33 +97,35 @@ def leer_teclado():
         except:
             pass
 
-
 def _leer_filtro(tty_fd, prompt):
-    """Lee un string de filtro carácter por carácter."""
+    global en_filtro
     resultado = ''
-    # restauramos modo canónico temporalmente para leer el filtro
-    old = termios.tcgetattr(tty_fd)
-    termios.tcsetattr(tty_fd, termios.TCSADRAIN, old)
+    en_filtro = True
     try:
-        import sys
-        sys.stdout.write(prompt)
-        sys.stdout.flush()
+        fd_out = os.open('/dev/tty', os.O_WRONLY)
+        # limpiamos la línea y mostramos el prompt
+        os.write(fd_out, b'\r\n')
+        os.write(fd_out, prompt.encode())
         while True:
             c = os.read(tty_fd, 1).decode(errors='replace')
             if c in ('\r', '\n'):
                 break
-            elif c in ('\x7f', '\x08'):
-                resultado = resultado[:-1]
             elif c == '\x1b':
+                resultado = '__LIMPIAR__'
                 break
+            elif c in ('\x7f', '\x08'):
+                if resultado:
+                    resultado = resultado[:-1]
+                    os.write(fd_out, b'\x08 \x08')
             else:
                 resultado += c
+                os.write(fd_out, c.encode())
+        os.close(fd_out)
     except:
         pass
     finally:
-        tty.setcbreak(tty_fd)
+        en_filtro = False
     return resultado
-
 
 def _filtrar_items(items):
     """Aplica filtros de nombre y usuario a la lista de items."""
@@ -124,23 +136,14 @@ def _filtrar_items(items):
                      or filtro_nombre.lower() in str(info.get('comando', '')).lower()]
     if filtro_usuario:
         resultado = [(pid, info) for pid, info in resultado
-                     if filtro_usuario.lower() in str(info.get('uid', '')).lower()]
+                     if filtro_usuario.lower() in str(info.get('usuario', '')).lower()]
     return resultado
 
-
 def _ordenar_items(items):
-    """Ordena los items según orden_actual."""
-    if orden_actual == 'rss':
-        def key_rss(x):
-            v = x[1].get('vm_rss', '0 kB')
-            try:
-                return int(str(v).replace(' kB', '').strip())
-            except:
-                return 0
-        return sorted(items, key=key_rss, reverse=True)
-    else:
+    if orden_actual == 'nombre':
+        return sorted(items, key=lambda x: str(x[1].get('nombre', x[1].get('comando', ''))).lower())
+    else:  # pid
         return sorted(items, key=lambda x: x[0])
-
 
 def construir_ayuda():
     tabla = Table(title="Ayuda — Monitor de Procesos")
@@ -158,7 +161,6 @@ def construir_ayuda():
     tabla.add_row("q",          "Salir limpiamente")
     return tabla
 
-
 def _agregar_filas_con_navegacion(tabla, items, max_filas):
     """Agrega filas a la tabla resaltando el índice seleccionado y el pinned."""
     global indice_seleccionado, proceso_pinned
@@ -174,7 +176,6 @@ def _agregar_filas_con_navegacion(tabla, items, max_filas):
         else:
             estilo = ""
         yield i, pid, info, estilo
-
 
 def construir_tabla(snapshot):
     global vista_activa, intervalo_actual, mostrar_ayuda
@@ -197,7 +198,7 @@ def construir_tabla(snapshot):
         tabla = Table(title=f"Monitor — Resumen [orden:{orden_actual}] [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
         tabla.add_column("PID",     style="cyan",   width=8)
         tabla.add_column("PPID",    style="blue",   width=8)
-        tabla.add_column("UID",     style="blue",   width=6)
+        tabla.add_column("Usuario",     style="blue",   width=6)
         tabla.add_column("Estado",  style="green",  width=8)
         tabla.add_column("Threads", style="yellow", width=8)
         tabla.add_column("Comando", style="white")
@@ -209,7 +210,7 @@ def construir_tabla(snapshot):
             tabla.add_row(
                 str(info['pid']),
                 str(info['ppid']),
-                str(info['uid']),
+                str(info['usuario']),
                 str(info['estado']),
                 str(info['threads']),
                 str(info['comando'])[:50],
@@ -252,6 +253,7 @@ def construir_tabla(snapshot):
         tabla.add_column("Destino",   style="white")
 
         items = _filtrar_items(list(datos.items()))
+        items = _ordenar_items(items)
 
         for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 15):
             lista = info.get('fds', [])
@@ -279,6 +281,7 @@ def construir_tabla(snapshot):
         tabla.add_column("NoVol ctx", style="red",    width=10)
 
         items = _filtrar_items(list(datos.items()))
+        items = _ordenar_items(items)
 
         for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 15):
             lista = info.get('threads', [])
@@ -305,6 +308,7 @@ def construir_tabla(snapshot):
         tabla.add_column("Capturadas", style="green",  width=20)
 
         items = _filtrar_items(list(datos.items()))
+        items = _ordenar_items(items)
 
         for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 20):
             tabla.add_row(
@@ -327,6 +331,7 @@ def construir_tabla(snapshot):
         tabla.add_column("NoVol ctx", style="red",    width=10)
 
         items = _filtrar_items(list(datos.items()))
+        items = _ordenar_items(items)
 
         for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 25):
             tabla.add_row(
@@ -356,7 +361,6 @@ def construir_tabla(snapshot):
 
     return tabla
 
-
 def display(snapshot, intervalo=2.0):
     global intervalo_actual
     intervalo_actual = intervalo
@@ -365,11 +369,13 @@ def display(snapshot, intervalo=2.0):
     t_teclado = threading.Thread(target=leer_teclado, daemon=True)
     t_teclado.start()
 
-    with Live(console=console, refresh_per_second=1) as live:
+    with Live(console=console, refresh_per_second=1, auto_refresh=False) as live:
         while True:
             try:
-                tabla = construir_tabla(snapshot)
-                live.update(tabla)
+                if not en_filtro:
+                    tabla = construir_tabla(snapshot)
+                    live.update(tabla)
+                    live.refresh()
             except Exception:
                 pass
-            time.sleep(intervalo_actual)
+            time.sleep(0.5)

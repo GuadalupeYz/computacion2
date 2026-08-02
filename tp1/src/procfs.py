@@ -1,4 +1,5 @@
 import os
+import pwd
 
 def get_pids():
     """Devuelve lista de PIDs activos leyendo /proc."""
@@ -7,7 +8,6 @@ def get_pids():
         if entrada.isdigit():
             pids.append(int(entrada))
     return pids
-
 
 def read_status(pid):
     """Parsea /proc/<pid>/status y devuelve un dict clave:valor."""
@@ -49,3 +49,10 @@ def read_cmdline(pid):
         return contenido.replace('\x00', ' ').strip()
     except (FileNotFoundError, ProcessLookupError):
         return None
+    
+def uid_a_usuario(uid):
+    """Convierte UID numérico a nombre de usuario."""
+    try:
+        return pwd.getpwuid(int(uid)).pw_name
+    except (KeyError, ValueError):
+        return str(uid)
