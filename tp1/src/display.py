@@ -5,40 +5,78 @@ import multiprocessing as mp
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
+import threading
 
+_lock_estado = threading.Lock()
 console = Console()
 vista_activa = 'resumen'
-
+intervalo_actual = 2.0
+mostrar_ayuda = False
 
 def leer_teclado():
-    global vista_activa
+    global vista_activa, intervalo_actual, mostrar_ayuda
     vistas = {
-        '1': 'resumen', 'r': 'resumen',
-        '2': 'memoria', 'm': 'memoria',
-        '3': 'fds',     'f': 'fds',
-        '4': 'threads', 't': 'threads',
-        '5': 'senales', 's': 'senales',
+        '1': 'resumen',    'r': 'resumen',
+        '2': 'memoria',    'm': 'memoria',
+        '3': 'fds',        'f': 'fds',
+        '4': 'threads',    't': 'threads',
+        '5': 'senales',    's': 'senales',
         '6': 'scheduling', 'p': 'scheduling',
-        '7': 'sistema', 'g': 'sistema',
+        '7': 'sistema',    'g': 'sistema',
     }
-    tty_fd = os.open('/dev/tty', os.O_RDONLY)
-    config_original = termios.tcgetattr(tty_fd)
+    intervalos_minimos = {
+        'resumen': 0.5, 'memoria': 1.0, 'fds': 2.0,
+        'threads': 0.5, 'senales': 5.0, 'scheduling': 5.0, 'sistema': 1.0
+    }
+    import traceback
     try:
-        tty.setcbreak(tty_fd)  # <-- setcbreak, no setraw
+        tty_fd = os.open('/dev/tty', os.O_RDONLY)
+        config_original = termios.tcgetattr(tty_fd)
+        tty.setcbreak(tty_fd)
         while True:
             tecla = os.read(tty_fd, 1).decode(errors='replace')
+            print(f"[TECLADO] recibí: {repr(tecla)}", flush=True)
             if tecla in vistas:
                 vista_activa = vistas[tecla]
+            elif tecla == '+':
+                intervalo_actual = min(intervalo_actual + 0.5, 30.0)
+            elif tecla == '-':
+                minimo = intervalos_minimos.get(vista_activa, 0.5)
+                intervalo_actual = max(intervalo_actual - 0.5, minimo)
+            elif tecla in ('h', '?'):
+                mostrar_ayuda = not mostrar_ayuda
             elif tecla == 'q':
+                import signal
+                os.kill(os.getppid(), signal.SIGTERM)
                 break
+    except Exception as e:
+        print(f"[TECLADO] SE CAYÓ CON ERROR: {e}", flush=True)
+        traceback.print_exc()
     finally:
-        termios.tcsetattr(tty_fd, termios.TCSADRAIN, config_original)
-        os.close(tty_fd)
+        try:
+            termios.tcsetattr(tty_fd, termios.TCSADRAIN, config_original)
+            os.close(tty_fd)
+        except:
+            pass
 
+def construir_ayuda():
+    tabla = Table(title="Ayuda — Monitor de Procesos")
+    tabla.add_column("Tecla",  style="cyan",  width=20)
+    tabla.add_column("Acción", style="white")
+    tabla.add_row("1-7 / r,m,f,t,s,p,g", "Cambiar vista")
+    tabla.add_row("+",   "Aumentar intervalo")
+    tabla.add_row("-",   "Disminuir intervalo")
+    tabla.add_row("h / ?", "Mostrar/ocultar ayuda")
+    tabla.add_row("q",   "Salir")
+    return tabla
 
 def construir_tabla(snapshot):
-    global vista_activa
-
+    global vista_activa, intervalo_actual, mostrar_ayuda
+    ayuda = mostrar_ayuda
+    
+    if ayuda:
+        return construir_ayuda()
+    
     if vista_activa not in snapshot:
         return Table(title=f"Vista: {vista_activa} (sin datos aún)")
 
@@ -175,12 +213,9 @@ def construir_tabla(snapshot):
                 str(info['vol_ctx']),
                 str(info['nonvol_ctx']),
             )
-
     else:
         tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
-
     return tabla
-
 
 def display(snapshot, intervalo=2.0):
     print(f"[Display] Iniciado con PID {mp.current_process().pid}")
