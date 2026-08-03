@@ -61,7 +61,8 @@ def main():
     configurar_señales(snapshot, todos)
 
     try:
-        p_display.join()
+        while p_display.is_alive():
+            _time.sleep(1)
     except KeyboardInterrupt:
         print("\n[Main] Deteniendo...")
     finally:
@@ -71,4 +72,4 @@ def main():
         manager.shutdown()
 
 if __name__ == '__main__':
-    main()
+    main()  

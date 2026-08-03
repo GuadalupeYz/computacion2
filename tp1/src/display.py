@@ -2,6 +2,7 @@ import time
 import threading
 import os, termios, tty
 import multiprocessing as mp
+import sys
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
@@ -364,18 +365,22 @@ def construir_tabla(snapshot):
 def display(snapshot, intervalo=2.0):
     global intervalo_actual
     intervalo_actual = intervalo
-    print(f"[Display] Iniciado con PID {mp.current_process().pid}")
+    print(f"[Display] Iniciado con PID {mp.current_process().pid}", file=sys.stderr)
 
     t_teclado = threading.Thread(target=leer_teclado, daemon=True)
     t_teclado.start()
 
-    with Live(console=console, refresh_per_second=1, auto_refresh=False) as live:
+    # esperamos datos antes de arrancar Live
+    while 'resumen' not in snapshot:
+        time.sleep(0.5)
+
+    with Live(console=console, refresh_per_second=1) as live:
         while True:
             try:
                 if not en_filtro:
                     tabla = construir_tabla(snapshot)
                     live.update(tabla)
-                    live.refresh()
             except Exception:
                 pass
-            time.sleep(0.5)
+            time.sleep(intervalo_actual)
+

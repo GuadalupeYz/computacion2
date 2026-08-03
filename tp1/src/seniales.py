@@ -21,21 +21,20 @@ def configurar_señales(snapshot, procesos):
         exit(0)
 
     def handler_dump(signum, frame):
-        """SIGUSR1: dump del snapshot a JSON."""
-        try:
-            import time, json
-            timestamp = int(time.time())
-            nombre = f'/app/dump_{timestamp}.json'
-            datos = {}
-            for k in list(snapshot.keys()):
+       try:
+           timestamp = int(time.time())
+           nombre = f'/app/dump_{timestamp}.json'
+           datos = {}
+           for k in list(snapshot.keys()):
                try:
-                datos[k] = dict(snapshot[k]) if hasattr(snapshot[k], 'keys') else snapshot[k]
+                   datos[k] = dict(snapshot[k]) if hasattr(snapshot[k], 'keys') else snapshot[k]
                except:
-                datos[k] = str(snapshot[k])
-            with open(nombre, 'w') as f:
+                   datos[k] = str(snapshot[k])
+           with open(nombre, 'w') as f:
                json.dump(datos, f, indent=2, default=str)
-        except Exception as e:
-            pass
+       except Exception as e:
+           with open('/app/error_dump.txt', 'w') as f:
+               f.write(str(e))
 
     def handler_verbose(signum, frame):
         """SIGUSR2: toggle modo verbose."""
@@ -44,14 +43,12 @@ def configurar_señales(snapshot, procesos):
         print(f"[Señales] Modo verbose: {not actual}")
 
     def handler_reload(signum, frame):
-        """SIGHUP: recarga config desde config.json."""
         try:
-            with open('config.json', 'r') as f:
+            with open('/app/config.json', 'r') as f:
                 config = json.load(f)
-            snapshot['config'] = config
-            print("[Señales] Configuración recargada")
+                snapshot['config'] = config
         except Exception as e:
-            print(f"[Señales] Error al recargar config: {e}")
+            pass
 
     signal.signal(signal.SIGINT,  handler_shutdown)
     signal.signal(signal.SIGTERM, handler_shutdown)
