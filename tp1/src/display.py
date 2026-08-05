@@ -6,6 +6,8 @@ import sys
 from rich.console import Console
 from rich.table import Table
 from rich.live import Live
+from rich.layout import Layout
+from rich.panel import Panel
 
 console = Console()
 vista_activa = 'resumen'
@@ -112,7 +114,7 @@ def _leer_filtro(tty_fd, prompt):
             if c in ('\r', '\n'):
                 break
             elif c == '\x1b':
-                resultado = '__LIMPIAR__'
+                resultado = ''
                 break
             elif c in ('\x7f', '\x08'):
                 if resultado:
@@ -153,7 +155,7 @@ def construir_ayuda():
     tabla.add_row("1-7 / r,m,f,t,s,p,g", "Cambiar vista")
     tabla.add_row("↑ / ↓",     "Navegar procesos")
     tabla.add_row("Enter",      "Fijar (pin) proceso seleccionado")
-    tabla.add_row("c",          "Cambiar orden (PID/RSS)")
+    tabla.add_row("c",          "Cambiar orden (PID/Nombre)")
     tabla.add_row("/",          "Filtrar por nombre")
     tabla.add_row("u",          "Filtrar por usuario")
     tabla.add_row("+",          "Aumentar intervalo de refresco")
@@ -178,9 +180,43 @@ def _agregar_filas_con_navegacion(tabla, items, max_filas):
             estilo = ""
         yield i, pid, info, estilo
 
-def construir_tabla(snapshot):
-    global vista_activa, intervalo_actual, mostrar_ayuda
+def construir_lista_procesos(snapshot):
+    if 'resumen' not in snapshot:
+        return Table(title="Procesos (cargando...)")
+    
+    datos = snapshot['resumen']
+    items = _filtrar_items(list(datos.items()))
+    items = _ordenar_items(items)
+    
+    tabla = Table(
+        title=f"Procesos [orden:{orden_actual}]{' [filtro:'+filtro_nombre+']' if filtro_nombre else ''}",
+        box=None, padding=(0,1)
+    )
+    tabla.add_column("PID",     style="cyan",   width=7)
+    tabla.add_column("PPID",    style="blue",   width=7)
+    tabla.add_column("Usuario", style="green",  width=12)
+    tabla.add_column("ST",      style="yellow", width=4)
+    tabla.add_column("CPU%",    style="red",    width=7)
+    tabla.add_column("RSS kB",  style="magenta",width=9)
+    tabla.add_column("TH",      style="white",  width=4)
+    tabla.add_column("Comando", style="white")
 
+    for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 10):
+        tabla.add_row(
+            str(info['pid']),
+            str(info['ppid']),
+            str(info['usuario'])[:12],
+            str(info['estado']),
+            str(info.get('cpu_pct', '0.0')) + '%',
+            str(info.get('vm_rss', '?')),
+            str(info['threads']),
+            str(info['comando'])[:35],
+            style=estilo
+        )
+    return tabla
+
+def construir_detalle(snapshot):
+    """Panel de detalle abajo, cambia según vista activa."""
     if mostrar_ayuda:
         return construir_ayuda()
 
@@ -188,38 +224,47 @@ def construir_tabla(snapshot):
         return Table(title=f"Vista: {vista_activa} (sin datos aún)")
 
     datos = snapshot[vista_activa]
-
     filtro_str = ""
     if filtro_nombre:
         filtro_str += f" [filtro: {filtro_nombre}]"
     if filtro_usuario:
         filtro_str += f" [usuario: {filtro_usuario}]"
 
+    items = _filtrar_items(list(datos.items()))
+    items = _ordenar_items(items)
+
     if vista_activa == 'resumen':
-        tabla = Table(title=f"Monitor — Resumen [orden:{orden_actual}] [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
+        tabla = Table(title=f"Detalle — Resumen [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
         tabla.add_column("PID",     style="cyan",   width=8)
         tabla.add_column("PPID",    style="blue",   width=8)
-        tabla.add_column("Usuario",     style="blue",   width=6)
+        tabla.add_column("Usuario", style="blue",   width=12)
         tabla.add_column("Estado",  style="green",  width=8)
         tabla.add_column("Threads", style="yellow", width=8)
         tabla.add_column("Comando", style="white")
-
-        items = _filtrar_items(list(datos.items()))
-        items = _ordenar_items(items)
-
-        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 30):
+        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 15):
             tabla.add_row(
                 str(info['pid']),
                 str(info['ppid']),
-                str(info['usuario']),
+                str(info['usuario'])[:12],
                 str(info['estado']),
                 str(info['threads']),
                 str(info['comando'])[:50],
                 style=estilo
             )
 
+    elif vista_activa == 'sistema':
+        tabla = Table(title=f"Detalle — Sistema Global [intervalo:{intervalo_actual:.1f}s]")
+        tabla.add_column("Métrica", style="cyan",  width=20)
+        tabla.add_column("Valor",   style="green")
+        tabla.add_row("CPU %",      str(datos.get('cpu_pct', '?')) + "%")
+        tabla.add_row("Load 1min",  str(datos.get('loadavg', {}).get('load_1', '?')))
+        tabla.add_row("Load 5min",  str(datos.get('loadavg', {}).get('load_5', '?')))
+        tabla.add_row("Mem Total",  str(datos.get('mem_total', '?')) + " kB")
+        tabla.add_row("Mem Free",   str(datos.get('mem_free',  '?')) + " kB")
+        tabla.add_row("Mem Cached", str(datos.get('mem_cached','?')) + " kB")
+
     elif vista_activa == 'memoria':
-        tabla = Table(title=f"Monitor — Memoria [orden:{orden_actual}] [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
+        tabla = Table(title=f"Detalle — Memoria [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
         tabla.add_column("PID",      style="cyan",   width=8)
         tabla.add_column("Nombre",   style="white",  width=15)
         tabla.add_column("VmRSS",    style="green",  width=12)
@@ -227,11 +272,7 @@ def construir_tabla(snapshot):
         tabla.add_column("VmSwap",   style="red",    width=12)
         tabla.add_column("Heap kB",  style="blue",   width=10)
         tabla.add_column("Stack kB", style="blue",   width=10)
-
-        items = _filtrar_items(list(datos.items()))
-        items = _ordenar_items(items)
-
-        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 30):
+        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 12):
             mapas = info.get('mapas', {})
             tabla.add_row(
                 str(info['pid']),
@@ -245,76 +286,56 @@ def construir_tabla(snapshot):
             )
 
     elif vista_activa == 'fds':
-        tabla = Table(title=f"Monitor — FDs [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
+        tabla = Table(title=f"Detalle — FDs [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
         tabla.add_column("PID",       style="cyan",   width=8)
         tabla.add_column("Nombre",    style="white",  width=15)
         tabla.add_column("Total FDs", style="yellow", width=10)
         tabla.add_column("FD",        style="blue",   width=6)
         tabla.add_column("Tipo",      style="green",  width=8)
         tabla.add_column("Destino",   style="white")
-
-        items = _filtrar_items(list(datos.items()))
-        items = _ordenar_items(items)
-
-        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 15):
+        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 10):
             lista = info.get('fds', [])
             if not lista:
                 tabla.add_row(str(pid), info['nombre'][:15], str(info['total']), '-', '-', '-', style=estilo)
                 continue
             primer = lista[0]
             tabla.add_row(
-                str(pid),
-                info['nombre'][:15],
-                str(info['total']),
-                str(primer['fd']),
-                str(primer['tipo']),
-                str(primer['destino'])[:40],
+                str(pid), info['nombre'][:15], str(info['total']),
+                str(primer['fd']), str(primer['tipo']), str(primer['destino'])[:40],
                 style=estilo
             )
 
     elif vista_activa == 'threads':
-        tabla = Table(title=f"Monitor — Threads [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
+        tabla = Table(title=f"Detalle — Threads [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
         tabla.add_column("PID",       style="cyan",   width=8)
         tabla.add_column("Nombre",    style="white",  width=15)
         tabla.add_column("TID",       style="blue",   width=8)
         tabla.add_column("Estado",    style="green",  width=8)
         tabla.add_column("Vol ctx",   style="yellow", width=10)
         tabla.add_column("NoVol ctx", style="red",    width=10)
-
-        items = _filtrar_items(list(datos.items()))
-        items = _ordenar_items(items)
-
-        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 15):
+        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 10):
             lista = info.get('threads', [])
             if not lista:
                 tabla.add_row(str(pid), info['nombre'][:15], '-', '-', '-', '-', style=estilo)
                 continue
             for t in lista[:2]:
                 tabla.add_row(
-                    str(pid),
-                    info['nombre'][:15],
-                    str(t['tid']),
-                    str(t['estado']),
-                    str(t['vol_ctx']),
-                    str(t['nonvol_ctx']),
+                    str(pid), info['nombre'][:15],
+                    str(t['tid']), str(t['estado']),
+                    str(t['vol_ctx']), str(t['nonvol_ctx']),
                     style=estilo
                 )
 
     elif vista_activa == 'senales':
-        tabla = Table(title=f"Monitor — Señales [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
+        tabla = Table(title=f"Detalle — Señales [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
         tabla.add_column("PID",        style="cyan",   width=8)
         tabla.add_column("Nombre",     style="white",  width=15)
         tabla.add_column("Bloqueadas", style="red",    width=20)
         tabla.add_column("Ignoradas",  style="yellow", width=20)
         tabla.add_column("Capturadas", style="green",  width=20)
-
-        items = _filtrar_items(list(datos.items()))
-        items = _ordenar_items(items)
-
-        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 20):
+        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 10):
             tabla.add_row(
-                str(pid),
-                info['nombre'][:15],
+                str(pid), info['nombre'][:15],
                 ', '.join(info['bloqueadas'])[:20] or '-',
                 ', '.join(info['ignoradas'])[:20]  or '-',
                 ', '.join(info['capturadas'])[:20] or '-',
@@ -322,7 +343,7 @@ def construir_tabla(snapshot):
             )
 
     elif vista_activa == 'scheduling':
-        tabla = Table(title=f"Monitor — Scheduling [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
+        tabla = Table(title=f"Detalle — Scheduling [intervalo:{intervalo_actual:.1f}s]{filtro_str}")
         tabla.add_column("PID",       style="cyan",   width=8)
         tabla.add_column("Nombre",    style="white",  width=15)
         tabla.add_column("Nice",      style="yellow", width=6)
@@ -330,57 +351,47 @@ def construir_tabla(snapshot):
         tabla.add_column("CPU",       style="blue",   width=8)
         tabla.add_column("Vol ctx",   style="yellow", width=10)
         tabla.add_column("NoVol ctx", style="red",    width=10)
-
-        items = _filtrar_items(list(datos.items()))
-        items = _ordenar_items(items)
-
-        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 25):
+        for i, pid, info, estilo in _agregar_filas_con_navegacion(tabla, items, 10):
             tabla.add_row(
-                str(pid),
-                info['nombre'][:15],
-                str(info['nice']),
-                str(info['politica']),
+                str(pid), info['nombre'][:15],
+                str(info['nice']), str(info['politica']),
                 str(info['cpu_affinidad']),
-                str(info['vol_ctx']),
-                str(info['nonvol_ctx']),
+                str(info['vol_ctx']), str(info['nonvol_ctx']),
                 style=estilo
             )
-
-    elif vista_activa == 'sistema':
-        tabla = Table(title=f"Monitor — Sistema Global [intervalo:{intervalo_actual:.1f}s]")
-        tabla.add_column("Métrica", style="cyan",  width=20)
-        tabla.add_column("Valor",   style="green")
-        tabla.add_row("CPU %",      str(datos.get('cpu_pct', '?')) + "%")
-        tabla.add_row("Load 1min",  str(datos.get('loadavg', {}).get('load_1', '?')))
-        tabla.add_row("Load 5min",  str(datos.get('loadavg', {}).get('load_5', '?')))
-        tabla.add_row("Mem Total",  str(datos.get('mem_total', '?')) + " kB")
-        tabla.add_row("Mem Free",   str(datos.get('mem_free',  '?')) + " kB")
-        tabla.add_row("Mem Cached", str(datos.get('mem_cached','?')) + " kB")
 
     else:
         tabla = Table(title=f"Vista: {vista_activa} (próximamente)")
 
     return tabla
 
+
+def construir_tabla(snapshot):
+    """Combina lista arriba + detalle abajo usando Layout."""
+    layout = Layout()
+    layout.split_column(
+        Layout(name="lista",   ratio=2),
+        Layout(name="detalle", ratio=3),
+    )
+    layout["lista"].update(Panel(construir_lista_procesos(snapshot), title="Lista de Procesos"))
+    layout["detalle"].update(Panel(construir_detalle(snapshot), title=f"Vista: {vista_activa.upper()}"))
+    return layout
+
 def display(snapshot, intervalo=2.0):
     global intervalo_actual
     intervalo_actual = intervalo
-    print(f"[Display] Iniciado con PID {mp.current_process().pid}", file=sys.stderr)
+    print(f"[Display] Iniciado con PID {mp.current_process().pid}")
 
     t_teclado = threading.Thread(target=leer_teclado, daemon=True)
     t_teclado.start()
 
-    # esperamos datos antes de arrancar Live
-    while 'resumen' not in snapshot:
-        time.sleep(0.5)
-
-    with Live(console=console, refresh_per_second=1) as live:
+    with Live(console=console, refresh_per_second=1, auto_refresh=False) as live:
         while True:
             try:
                 if not en_filtro:
                     tabla = construir_tabla(snapshot)
                     live.update(tabla)
+                    live.refresh()
             except Exception:
                 pass
-            time.sleep(intervalo_actual)
-
+            time.sleep(0.5)
