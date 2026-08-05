@@ -1,5 +1,5 @@
-Monitor de Procesos y Threads — TP1 Computación II
-Alumna: Yañez, Guadalupe — Universidad de Mendoza — Ingeniería Informática — 2026
+# Monitor de Procesos y Threads — TP1 Computación II
+# Alumna: Yañez, Guadalupe — Universidad de Mendoza — Ingeniería Informática — 2026
 
 1. Descripción general
 Este proyecto implementa un monitor de procesos y threads del sistema operativo Linux en tiempo real, similar a htop, pero con énfasis en mostrar la anatomía interna de cada proceso. Toda la información se extrae leyendo directamente el filesystem /proc del kernel de Linux, sin usar librerías externas como psutil.
@@ -17,34 +17,42 @@ docker compose up --build
 docker attach tp1-monitor-1
 
 Keybindings
-Tecla	Acción
-1-7 / r,m,f,t,s,p,g	Cambiar vista
-↑ / ↓	Navegar por la lista de procesos
-Enter	Fijar (pin) proceso seleccionado
-c	Cambiar orden (PID / Nombre)
-/	Filtrar por nombre de comando
-u	Filtrar por usuario
-+ / -	Ajustar intervalo de refresco
-h / ?	Mostrar/ocultar ayuda
-q	Salir limpiamente
+Tecla: Acción
+1-7 / r,m,f,t,s,p,g	:Cambiar vista
+
+↑ / ↓	:Navegar por la lista de procesos
+
+Enter	:Fijar (pin) proceso seleccionado
+
+c	:Cambiar orden (PID / Nombre)
+
+/	:Filtrar por nombre de comando
+
+u	:Filtrar por usuario
+
++ / -	:Ajustar intervalo de refresco
++ 
+h / ?	:Mostrar/ocultar ayuda
+
+q	:Salir limpiamente
 
 Nota sobre filtros: Para activar el filtro presionar / o u, escribir el texto y presionar Enter para aplicar. Para limpiar el filtro, presionar / o u nuevamente y luego Esc.
 
 
 Señales que responde el monitor
-# Obtener el nombre del contenedor
+> Obtener el nombre del contenedor
 docker ps
 
-# Dump del snapshot a JSON
+> Dump del snapshot a JSON
 docker kill --signal=SIGUSR1 <nombre_contenedor>
 
-# Toggle modo verbose
+> Toggle modo verbose
 docker kill --signal=SIGUSR2 <nombre_contenedor>
 
-# Recargar config.json
+> Recargar config.json
 docker kill --signal=SIGHUP <nombre_contenedor>
 
-# Shutdown limpio
+> Shutdown limpio
 docker kill --signal=SIGTERM <nombre_contenedor>
 
 2. Diagrama de arquitectura
@@ -231,7 +239,7 @@ Presionar / nuevamente y luego Esc para limpiar el filtro
 Lo mismo aplica para u (filtro por usuario)
 
 Probar las señales
-# En otra terminal mientras el monitor corre:
+En otra terminal mientras el monitor corre:
 
 docker ps  # anotar el nombre del contenedor
 
