@@ -52,38 +52,48 @@ docker kill --signal=SIGTERM <nombre>        # shutdown limpio
 
 ## 2. Diagrama de arquitectura
 
-┌─────────────────────────────────────┐
-│ SNAPSHOT GLOBAL │
-│ (Manager.dict compartido) │
-│ "resumen" : { pid: {...}, ... } │
-│ "memoria" : { pid: {...}, ... } │
-│ "fds" : { pid: {...}, ... } │
-│ "threads" : { pid: {...}, ... } │
-│ "senales" : { pid: {...}, ... } │
-│ "scheduling" : { pid: {...}, ... } │
-│ "sistema" : { cpu_pct: ..., } } │
-└────────▲──────────────────▲─────────┘
-│ escriben │ lee
-┌────────┴────────┐ │
-│ 7 analizadores │ ┌────▼─────┐
-│ independientes │ │ Display │
-└────────▲────────┘ │ TUI │
-│ queue_datos └──────────┘
-┌────────▼────────┐
-│ Agregador │
-└────────▲────────┘
-│ queue_pids (una por analizador)
-┌────────▼────────┐
-│ Recolector │
-└────────▲────────┘
-│
-/proc
-
+```
+                    ┌─────────────────────────────────────┐
+                    │         SNAPSHOT GLOBAL             │
+                    │      (Manager.dict compartido)      │
+                    │  "resumen"    : { pid: {...}, ... } │
+                    │  "memoria"    : { pid: {...}, ... } │
+                    │  "fds"        : { pid: {...}, ... } │
+                    │  "threads"    : { pid: {...}, ... } │
+                    │  "senales"    : { pid: {...}, ... } │
+                    │  "scheduling" : { pid: {...}, ... } │
+                    │  "sistema"    : { cpu_pct: ..., ... }│
+                    └────────▲──────────────────▲─────────┘
+                             │ escriben          │ lee
+              ┌──────────────┼──────────┐        │
+              │              │          │        │
+    ┌─────────▼──┐  ┌────────▼──┐      │   ┌───▼──────┐
+    │  Resumen   │  │  Memoria  │  ... │   │  Display │
+    │  cada 2s   │  │  cada 3s  │      │   │   TUI    │
+    └─────────▲──┘  └────────▲──┘      │   └──────────┘
+              │  queue_datos  │
+              └──────┬────────┘
+                     │
+              ┌──────▼──────┐
+              │  Agregador  │
+              └──────▲──────┘
+                     │ queue_datos
+    ┌────────────────┴──────────────────┐
+    │     7 analizadores independientes  │
+    └───────────────────────────────────┘
+                     ▲
+              ┌──────┴──────┐
+              │  Recolector │  (una queue_pids por analizador)
+              └─────────────┘
+                     ▲
+                  /proc
+```
 
 **Flujo de datos:**
 
+```
 /proc → Recolector → queue_pids_X → Analizador X → queue_datos → Agregador → Manager.dict → Display
-
+```
 
 ---
 
@@ -205,6 +215,15 @@ El thread de teclado en el display usa `os.open('/dev/tty', os.O_RDONLY)` en lug
 
 ![alt text](image-9.png)
 
+---
+
+## 6. Limitaciones conocidas
+
+1. **`docker compose up --build`**: las teclas no responden porque Docker Compose no conecta stdin directamente. Usar `docker compose run --rm monitor`.
+2. **Permisos de `/proc`**: procesos del kernel deniegan acceso a sus FDs. Se maneja con `try/except PermissionError` mostrando `-`.
+3. **PIDs efímeros**: un proceso puede morir entre que se lista y se lee. Se maneja con `try/except FileNotFoundError`.
+4. **Dump dentro del contenedor**: SIGUSR1 crea el archivo en `/app/` del contenedor. Para accederlo: `docker exec <contenedor> ls /app/dump_*.json`.
+5. **Un FD por proceso**: el snapshot tiene todos los FDs pero por espacio se muestra solo el primero.
 
 
 ---
