@@ -1,4 +1,3 @@
-
 import os
 import time
 import sys
@@ -6,7 +5,6 @@ import multiprocessing as mp
 
 
 def inferir_tipo(destino):
-    """Infiere el tipo de FD según el destino del symlink."""
     if destino.startswith('/dev/pts') or destino.startswith('/dev/tty'):
         return 'tty'
     elif destino.startswith('socket:'):
@@ -24,18 +22,13 @@ def inferir_tipo(destino):
 
 
 def leer_fds(pid):
-    """Lee los FDs abiertos de un proceso."""
     fds = []
     ruta = f'/proc/{pid}/fd'
     try:
         for fd in os.listdir(ruta):
             try:
                 destino = os.readlink(f'{ruta}/{fd}')
-                fds.append({
-                    'fd':      fd,
-                    'destino': destino,
-                    'tipo':    inferir_tipo(destino),
-                })
+                fds.append({'fd': fd, 'destino': destino, 'tipo': inferir_tipo(destino)})
             except (FileNotFoundError, PermissionError):
                 continue
     except (FileNotFoundError, PermissionError):
@@ -43,8 +36,8 @@ def leer_fds(pid):
     return fds
 
 
-def fds(queue_pids, queue_datos, intervalo=5.0):
-    print(f"[FDs] Iniciado con PID {mp.current_process().pid}",file=sys.stderr)
+def fds(queue_pids, queue_datos, intervalo_value):
+    print(f"[FDs] Iniciado con PID {mp.current_process().pid}", file=sys.stderr)
 
     while True:
         try:
@@ -53,21 +46,15 @@ def fds(queue_pids, queue_datos, intervalo=5.0):
             continue
 
         resultados = {}
-
         for info in lista_pids:
             pid = info['pid']
             lista_fds = leer_fds(pid)
-
             resultados[pid] = {
-                'pid':     pid,
-                'nombre':  info['nombre'],
-                'total':   len(lista_fds),
-                'fds':     lista_fds[:20],  # máximo 20 para no sobrecargar
+                'pid':    pid,
+                'nombre': info['nombre'],
+                'total':  len(lista_fds),
+                'fds':    lista_fds[:20],
             }
 
-        queue_datos.put({
-            'clave': 'fds',
-            'datos': resultados
-        })
-
-        time.sleep(intervalo)
+        queue_datos.put({'clave': 'fds', 'datos': resultados})
+        time.sleep(intervalo_value.value)
