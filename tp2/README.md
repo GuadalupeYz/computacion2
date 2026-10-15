@@ -1,0 +1,64 @@
+# TP2 — Plataforma de Tareas Distribuidas
+
+Servicio HTTP (FastAPI) que recibe tareas, las encola en una `asyncio.Queue`
+y las ejecuta con un pool de workers asíncronos.
+
+> Estado: **semana 1** — API, cola y workers andando. `esperar` es real;
+> `descargar` y `hashear` todavía devuelven datos simulados.
+
+## Cómo levantarlo
+
+```bash
+cd tp2
+docker compose up --build
+```
+
+La API queda en `http://localhost:8000` (documentación interactiva en `/docs`).
+
+Variables de entorno (en `docker-compose.yml`):
+
+| Variable | Default | Qué hace |
+|---|---|---|
+| `WORKERS` | 4 | Cantidad de workers del pool |
+| `TIMEOUT_DEFAULT` | 30 | Timeout en segundos si la tarea no trae uno |
+
+## Ejemplos
+
+```bash
+# Encolar (responde al instante con el id)
+curl -X POST localhost:8000/tareas -H 'Content-Type: application/json' \
+  -d '{"tipo": "esperar", "parametros": {"segundos": 5}}'
+
+# Con timeout propio
+curl -X POST localhost:8000/tareas -H 'Content-Type: application/json' \
+  -d '{"tipo": "esperar", "parametros": {"segundos": 10}, "timeout": 2}'
+
+curl -X POST localhost:8000/tareas -H 'Content-Type: application/json' \
+  -d '{"tipo": "descargar", "parametros": {"urls": ["https://example.com"]}}'
+
+curl -X POST localhost:8000/tareas -H 'Content-Type: application/json' \
+  -d '{"tipo": "hashear", "parametros": {"texto": "hola", "iteraciones": 1000000}}'
+
+curl localhost:8000/tareas                    # todas
+curl 'localhost:8000/tareas?estado=ejecutando' # filtradas por estado
+curl localhost:8000/tareas/<id>               # una
+curl -X DELETE localhost:8000/tareas/<id>     # cancelar
+curl localhost:8000/estadisticas
+```
+
+## Estructura
+
+```
+tp2/
+├── src/
+│   ├── main.py      # API FastAPI y arranque (lifespan)
+│   ├── cola.py      # PoolWorkers: asyncio.Queue + N corrutinas worker
+│   ├── tareas.py    # Implementación de cada tipo de tarea
+│   └── modelos.py   # Estados, Tarea y el cuerpo del POST
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
+```
+
+<!-- Pendiente: diagrama, decisiones de diseño, mediciones, conceptos del
+curso, limitaciones y lo que aprendí. -->

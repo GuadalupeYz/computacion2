@@ -1,0 +1,11 @@
+services:
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - WORKERS=4
+      - TIMEOUT_DEFAULT=30
+      - PYTHONUNBUFFERED=1
+    # SIGTERM le da 15 s al apagado ordenado antes del SIGKILL
+    stop_grace_period: 15s
