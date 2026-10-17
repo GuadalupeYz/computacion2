@@ -21,6 +21,8 @@ Variables de entorno (en `docker-compose.yml`):
 |---|---|---|
 | `WORKERS` | 4 | Cantidad de workers del pool |
 | `TIMEOUT_DEFAULT` | 30 | Timeout en segundos si la tarea no trae uno |
+| `PROCESOS` | cantidad de CPUs | Procesos del `ProcessPoolExecutor` para `hashear` |
+| `HASH_SIN_EXECUTOR` | 0 | Con `1`, `hashear` corre en el event loop (para medir el bloqueo) |
 
 ## Ejemplos
 

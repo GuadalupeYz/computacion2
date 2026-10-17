@@ -3,13 +3,22 @@
 Cada ejecutor es una corrutina que recibe los parámetros y devuelve el
 resultado. El pool no sabe nada de tipos: busca el ejecutor en EJECUTORES.
 
-Semana 1: `esperar` ya es real; `descargar` y `hashear` devuelven datos
-simulados para poder probar la API y la cola de punta a punta.
+`esperar` y `hashear` ya son reales; `descargar` todavía devuelve datos
+simulados.
 """
 
 import asyncio
 import hashlib
+import os
+from concurrent.futures import ProcessPoolExecutor
 from typing import Any
+
+# Pool de procesos para lo CPU-bound. Lo crea y lo cierra el lifespan de
+# main.py: crearlo por pedido costaría más que el propio cálculo.
+pool_cpu: ProcessPoolExecutor | None = None
+
+# HASH_SIN_EXECUTOR=1 calcula en el event loop: solo para la medición 2
+SIN_EXECUTOR = os.environ.get("HASH_SIN_EXECUTOR") == "1"
 
 
 async def esperar(parametros: dict[str, Any]) -> dict[str, Any]:
@@ -40,8 +49,15 @@ async def hashear(parametros: dict[str, Any]) -> dict[str, Any]:
     iteraciones = int(parametros.get("iteraciones", 1))
     if iteraciones < 1:
         raise ValueError("iteraciones tiene que ser >= 1")
-    # TODO: así como está bloquea el event loop; pasarlo a un executor
-    resultado = hash_iterado(texto, iteraciones)
+    if SIN_EXECUTOR:
+        # Versión bloqueante: el loop queda congelado hasta que termine
+        resultado = hash_iterado(texto, iteraciones)
+    else:
+        # El cálculo corre en otro proceso; esta corrutina solo espera el
+        # resultado con await, y mientras tanto el loop atiende a los demás
+        loop = asyncio.get_running_loop()
+        resultado = await loop.run_in_executor(
+            pool_cpu, hash_iterado, texto, iteraciones)
     return {"iteraciones": iteraciones, "hash": resultado}
 
 

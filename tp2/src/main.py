@@ -1,12 +1,15 @@
 """API HTTP de la plataforma de tareas."""
 
+import asyncio
 import logging
 import os
+from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 
+import tareas
 from cola import PoolWorkers
 from modelos import ESTADOS_FINALES, Estado, TareaEntrada
 
@@ -15,16 +18,21 @@ logging.basicConfig(level=logging.INFO,
 
 WORKERS = int(os.environ.get("WORKERS", "4"))
 TIMEOUT_DEFAULT = float(os.environ.get("TIMEOUT_DEFAULT", "30"))
+PROCESOS = int(os.environ.get("PROCESOS", str(os.cpu_count() or 2)))
 
 pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Los workers se crean acá, con el event loop de uvicorn ya corriendo
+    # Todo se crea acá, con el event loop de uvicorn ya corriendo
+    tareas.pool_cpu = ProcessPoolExecutor(max_workers=PROCESOS)
     pool.iniciar()
     yield
     await pool.detener()
+    # shutdown(wait=True) bloquea: lo mando a un thread para no frenar el loop
+    await asyncio.to_thread(tareas.pool_cpu.shutdown, wait=True,
+                            cancel_futures=True)
 
 
 app = FastAPI(title="Plataforma de tareas distribuidas", lifespan=lifespan)
