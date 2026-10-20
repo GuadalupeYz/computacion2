@@ -18,10 +18,12 @@ log = logging.getLogger("cola")
 
 
 class PoolWorkers:
-    def __init__(self, cantidad: int, timeout_default: float):
+    def __init__(self, cantidad: int, timeout_default: float,
+                 cola_max: int):
         self.cantidad = cantidad
         self.timeout_default = timeout_default
-        self.cola: asyncio.Queue[str] = asyncio.Queue()
+        # maxsize es backpressure: la cola no puede crecer sin límite
+        self.cola: asyncio.Queue[str] = asyncio.Queue(maxsize=cola_max)
         self.tareas: dict[str, Tarea] = {}
         self.ocupados = 0
         self._workers: list[asyncio.Task] = []
@@ -42,11 +44,14 @@ class PoolWorkers:
 
     def encolar(self, tipo: str, parametros: dict[str, Any],
                 timeout: float | None) -> Tarea:
+        """Encola una tarea. Lanza asyncio.QueueFull si la cola está llena."""
         tarea = Tarea(tipo=tipo, parametros=parametros,
                       timeout=timeout or self.timeout_default)
-        self.tareas[tarea.id] = tarea
-        # put_nowait: la cola no tiene tope, así que nunca bloquea
+        # put_nowait en vez de await put(): si está llena, falla al instante
+        # en lugar de dejar al cliente HTTP esperando un lugar
         self.cola.put_nowait(tarea.id)
+        # Recién se registra si entró, así no quedan tareas fantasma
+        self.tareas[tarea.id] = tarea
         return tarea
 
     def cancelar(self, tarea_id: str) -> Tarea:

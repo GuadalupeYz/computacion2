@@ -18,9 +18,11 @@ logging.basicConfig(level=logging.INFO,
 
 WORKERS = int(os.environ.get("WORKERS", "4"))
 TIMEOUT_DEFAULT = float(os.environ.get("TIMEOUT_DEFAULT", "30"))
+COLA_MAX = int(os.environ.get("COLA_MAX", "100"))
 PROCESOS = int(os.environ.get("PROCESOS", str(os.cpu_count() or 2)))
 
-pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT)
+pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT,
+                   cola_max=COLA_MAX)
 
 
 @asynccontextmanager
@@ -41,7 +43,11 @@ app = FastAPI(title="Plataforma de tareas distribuidas", lifespan=lifespan)
 @app.post("/tareas", status_code=status.HTTP_202_ACCEPTED)
 async def crear_tarea(entrada: TareaEntrada):
     # Solo encola y responde: no espera a que la tarea termine
-    tarea = pool.encolar(entrada.tipo, entrada.parametros, entrada.timeout)
+    try:
+        tarea = pool.encolar(entrada.tipo, entrada.parametros, entrada.timeout)
+    except asyncio.QueueFull:
+        raise HTTPException(status_code=503,
+                            detail="Cola llena, reintentá más tarde")
     return {"id": tarea.id, "estado": tarea.estado.value}
 
 

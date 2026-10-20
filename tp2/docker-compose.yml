@@ -6,6 +6,7 @@ services:
     environment:
       - WORKERS=4
       - TIMEOUT_DEFAULT=30
+      - COLA_MAX=100
       - PROCESOS=2
       - HASH_SIN_EXECUTOR=0
       - PYTHONUNBUFFERED=1
