@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, status
 
 import tareas
-from cola import PoolWorkers
+from cola import Apagando, PoolWorkers
 from modelos import ESTADOS_FINALES, Estado, TareaEntrada
 
 logging.basicConfig(level=logging.INFO,
@@ -22,6 +22,8 @@ TIMEOUT_DEFAULT = float(os.environ.get("TIMEOUT_DEFAULT", "30"))
 COLA_MAX = int(os.environ.get("COLA_MAX", "100"))
 PROCESOS = int(os.environ.get("PROCESOS", str(os.cpu_count() or 2)))
 TIMEOUT_HTTP = float(os.environ.get("TIMEOUT_HTTP", "10"))
+# Menor que el stop_grace_period de Docker (15 s), que después manda SIGKILL
+APAGADO_MAX = float(os.environ.get("APAGADO_MAX", "10"))
 
 pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT,
                    cola_max=COLA_MAX)
@@ -35,8 +37,19 @@ async def lifespan(app: FastAPI):
                                             follow_redirects=True)
     pool.iniciar()
     yield
-    await pool.detener()
+    # Acá llegamos cuando uvicorn recibe SIGINT/SIGTERM: ya dejó de aceptar
+    # conexiones y terminó los pedidos HTTP en curso
+    forzado = await pool.detener(limite=APAGADO_MAX)
     await tareas.cliente_http.aclose()
+    if forzado:
+        # Un hash que ya arrancó no se puede cancelar: hay que matar los
+        # procesos, o shutdown(wait=True) esperaría a que terminen.
+        # kill() y no terminate(): los hijos nacieron con fork y heredaron
+        # el handler de SIGTERM de uvicorn, que no los hace salir. SIGKILL
+        # no se puede atrapar. (_processes es interno; 3.14 trae
+        # terminate_workers().)
+        for proceso in list((tareas.pool_cpu._processes or {}).values()):
+            proceso.kill()
     # shutdown(wait=True) bloquea: lo mando a un thread para no frenar el loop
     await asyncio.to_thread(tareas.pool_cpu.shutdown, wait=True,
                             cancel_futures=True)
@@ -50,6 +63,9 @@ async def crear_tarea(entrada: TareaEntrada):
     # Solo encola y responde: no espera a que la tarea termine
     try:
         tarea = pool.encolar(entrada.tipo, entrada.parametros, entrada.timeout)
+    except Apagando:
+        raise HTTPException(status_code=503,
+                            detail="El servidor se está apagando")
     except asyncio.QueueFull:
         raise HTTPException(status_code=503,
                             detail="Cola llena, reintentá más tarde")

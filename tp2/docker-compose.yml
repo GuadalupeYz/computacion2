@@ -11,6 +11,8 @@ services:
       - HASH_SIN_EXECUTOR=0
       - TIMEOUT_HTTP=10
       - DESCARGAS_MAX=20
+      - APAGADO_MAX=10
       - PYTHONUNBUFFERED=1
-    # SIGTERM le da 15 s al apagado ordenado antes del SIGKILL
+    # Tras SIGTERM, Docker espera 15 s antes del SIGKILL: APAGADO_MAX (10 s)
+    # tiene que entrar holgado ahí
     stop_grace_period: 15s

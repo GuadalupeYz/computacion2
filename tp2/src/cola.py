@@ -16,6 +16,14 @@ from tareas import EJECUTORES
 
 log = logging.getLogger("cola")
 
+# Valor único que le dice a un worker "terminá". Con object() es imposible
+# confundirlo con un dato real: nada que venga de afuera es idéntico a él.
+CENTINELA = object()
+
+
+class Apagando(Exception):
+    """El pool ya no acepta tareas porque el servidor se está apagando."""
+
 
 class PoolWorkers:
     def __init__(self, cantidad: int, timeout_default: float,
@@ -23,7 +31,9 @@ class PoolWorkers:
         self.cantidad = cantidad
         self.timeout_default = timeout_default
         # maxsize es backpressure: la cola no puede crecer sin límite
-        self.cola: asyncio.Queue[str] = asyncio.Queue(maxsize=cola_max)
+        # Lleva ids de tareas, o el CENTINELA al apagar
+        self.cola: asyncio.Queue[Any] = asyncio.Queue(maxsize=cola_max)
+        self.aceptando = True
         self.tareas: dict[str, Tarea] = {}
         self.ocupados = 0
         self._workers: list[asyncio.Task] = []
@@ -36,17 +46,47 @@ class PoolWorkers:
                 asyncio.create_task(self._worker(n), name=f"worker-{n}"))
         log.info("Pool iniciado con %d workers", self.cantidad)
 
-    async def detener(self) -> None:
-        # TODO semana 2: apagado ordenado (esperar en curso + volcado JSON)
-        for w in self._workers:
-            w.cancel()
-        await asyncio.gather(*self._workers, return_exceptions=True)
+    async def detener(self, limite: float) -> bool:
+        """Apagado ordenado: deja terminar lo que está corriendo, con límite.
+
+        Devuelve True si hubo que cortar workers porque se venció el límite.
+        """
+        self.aceptando = False
+        # Las pendientes no se ejecutan: los workers las descartan al sacarlas
+        for tarea in self.tareas.values():
+            if tarea.estado == Estado.PENDIENTE:
+                self._marcar_cancelada(tarea, "cancelada por apagado")
+
+        async def poner_centinelas() -> None:
+            # await put(): si la cola está llena, espera a que se haga lugar
+            for _ in self._workers:
+                await self.cola.put(CENTINELA)
+
+        poner = asyncio.create_task(poner_centinelas())
+        log.info("Apagando: esperando hasta %.0f s a %d tareas en curso",
+                 limite, len(self._en_curso))
+        _, colgados = await asyncio.wait(self._workers, timeout=limite)
+        if colgados:
+            log.warning("Se venció el límite: se cortan %d workers",
+                        len(colgados))
+            for w in colgados:
+                w.cancel()
+            await asyncio.gather(*colgados, return_exceptions=True)
+        poner.cancel()
+        await asyncio.gather(poner, return_exceptions=True)
         self._workers.clear()
         log.info("Pool detenido")
+        return bool(colgados)
 
     def encolar(self, tipo: str, parametros: dict[str, Any],
                 timeout: float | None) -> Tarea:
-        """Encola una tarea. Lanza asyncio.QueueFull si la cola está llena."""
+        """Encola una tarea.
+
+        Lanza Apagando si el servidor se está cerrando, o asyncio.QueueFull
+        si la cola está llena.
+        """
+        if not self.aceptando:
+            raise Apagando()
         tarea = Tarea(tipo=tipo, parametros=parametros,
                       timeout=timeout or self.timeout_default)
         # put_nowait en vez de await put(): si está llena, falla al instante
@@ -78,9 +118,12 @@ class PoolWorkers:
 
     async def _worker(self, n: int) -> None:
         while True:
-            tarea_id = await self.cola.get()
+            item = await self.cola.get()
             try:
-                tarea = self.tareas[tarea_id]
+                if item is CENTINELA:
+                    log.info("worker-%d termina", n)
+                    return  # el finally igual llama a task_done()
+                tarea = self.tareas[item]
                 if tarea.estado != Estado.PENDIENTE:
                     continue  # la cancelaron mientras esperaba en la cola
                 await self._ejecutar(tarea, n)

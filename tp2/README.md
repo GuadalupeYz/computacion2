@@ -3,8 +3,8 @@
 Servicio HTTP (FastAPI) que recibe tareas, las encola en una `asyncio.Queue`
 y las ejecuta con un pool de workers asíncronos.
 
-> Estado: en desarrollo. Las tres tareas andan; falta cancelación de tareas
-> en ejecución, apagado ordenado, mediciones e informe.
+> Estado: en desarrollo. Falta el volcado a JSON, las mediciones y el
+> informe.
 
 ## Cómo levantarlo
 
@@ -25,6 +25,7 @@ Variables de entorno (en `docker-compose.yml`):
 | `PROCESOS` | cantidad de CPUs | Procesos del `ProcessPoolExecutor` para `hashear` |
 | `TIMEOUT_HTTP` | 10 | Timeout en segundos de cada URL en `descargar` |
 | `DESCARGAS_MAX` | 20 | Descargas simultáneas como máximo (entre todas las tareas) |
+| `APAGADO_MAX` | 10 | Segundos que el apagado espera a las tareas en curso |
 | `HASH_SIN_EXECUTOR` | 0 | Con `1`, `hashear` corre en el event loop (para medir el bloqueo) |
 
 ## Ejemplos
