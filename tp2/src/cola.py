@@ -27,6 +27,8 @@ class PoolWorkers:
         self.tareas: dict[str, Tarea] = {}
         self.ocupados = 0
         self._workers: list[asyncio.Task] = []
+        # id -> Task de la ejecución en curso, para poder cancelarla
+        self._en_curso: dict[str, asyncio.Task] = {}
 
     def iniciar(self) -> None:
         for n in range(self.cantidad):
@@ -59,10 +61,20 @@ class PoolWorkers:
         tarea = self.tareas[tarea_id]
         if tarea.estado == Estado.PENDIENTE:
             # Sigue en la cola: el worker la va a descartar al sacarla
-            tarea.estado = Estado.CANCELADA
-            tarea.finalizada = time.time()
-        # TODO semana 2: cancelar también las que están EJECUTANDO
+            self._marcar_cancelada(tarea, "cancelada mientras esperaba")
+        elif tarea.estado == Estado.EJECUTANDO:
+            ejecucion = self._en_curso.get(tarea_id)
+            # cancel() inyecta CancelledError en el próximo await de la
+            # ejecución. Devuelve False si ya terminó: ahí no la toco.
+            if ejecucion is not None and ejecucion.cancel():
+                self._marcar_cancelada(tarea, "cancelada durante la ejecución")
         return tarea
+
+    @staticmethod
+    def _marcar_cancelada(tarea: Tarea, motivo: str) -> None:
+        tarea.estado = Estado.CANCELADA
+        tarea.error = motivo
+        tarea.finalizada = time.time()
 
     async def _worker(self, n: int) -> None:
         while True:
@@ -83,11 +95,24 @@ class PoolWorkers:
         tarea.iniciada = time.time()
         self.ocupados += 1
         log.info("worker-%d ejecuta %s (%s)", n, tarea.id, tarea.tipo)
+        ejecutor = EJECUTORES[tarea.tipo]
+        # La ejecución es una Task aparte: así se puede cancelar desde
+        # DELETE sin cancelar al worker, que sigue vivo para la próxima
+        ejecucion = asyncio.create_task(
+            asyncio.wait_for(ejecutor(tarea.parametros),
+                             timeout=tarea.timeout),
+            name=f"tarea-{tarea.id}")
+        self._en_curso[tarea.id] = ejecucion
         try:
-            ejecutor = EJECUTORES[tarea.tipo]
-            tarea.resultado = await asyncio.wait_for(
-                ejecutor(tarea.parametros), timeout=tarea.timeout)
+            tarea.resultado = await ejecucion
             tarea.estado = Estado.COMPLETADA
+        except asyncio.CancelledError:
+            if asyncio.current_task().cancelling():
+                # Me cancelaron a mí (el worker): se apaga el servidor.
+                # `await ejecucion` ya propagó la cancelación hacia adentro.
+                self._marcar_cancelada(tarea, "cancelada por apagado")
+                raise  # nunca tragarse la cancelación del worker
+            # Si no, la canceló DELETE: el estado ya quedó marcado allá
         except TimeoutError:
             tarea.estado = Estado.FALLIDA
             tarea.error = f"timeout: superó {tarea.timeout} s"
@@ -95,7 +120,10 @@ class PoolWorkers:
             tarea.estado = Estado.FALLIDA
             tarea.error = f"{type(e).__name__}: {e}"
         finally:
-            tarea.finalizada = time.time()
+            # Pase lo que pase: sin referencias colgadas ni contador roto
+            self._en_curso.pop(tarea.id, None)
+            if tarea.finalizada is None:
+                tarea.finalizada = time.time()
             self.ocupados -= 1
             log.info("%s terminó: %s", tarea.id, tarea.estado.value)
 
@@ -117,5 +145,6 @@ class PoolWorkers:
             "duracion_promedio": promedio,
             "workers": self.cantidad,
             "workers_ocupados": self.ocupados,
+            "en_ejecucion": len(self._en_curso),
             "en_cola": self.cola.qsize(),
         }
