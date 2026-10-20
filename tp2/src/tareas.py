@@ -3,15 +3,18 @@
 Cada ejecutor es una corrutina que recibe los parámetros y devuelve el
 resultado. El pool no sabe nada de tipos: busca el ejecutor en EJECUTORES.
 
-`esperar` y `hashear` ya son reales; `descargar` todavía devuelve datos
-simulados.
+`esperar` duerme, `descargar` hace I/O de red con httpx y `hashear` calcula
+en un pool de procesos.
 """
 
 import asyncio
 import hashlib
 import os
+import time
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any
+
+import httpx
 
 # Pool de procesos para lo CPU-bound. Lo crea y lo cierra el lifespan de
 # main.py: crearlo por pedido costaría más que el propio cálculo.
@@ -19,6 +22,15 @@ pool_cpu: ProcessPoolExecutor | None = None
 
 # HASH_SIN_EXECUTOR=1 calcula en el event loop: solo para la medición 2
 SIN_EXECUTOR = os.environ.get("HASH_SIN_EXECUTOR") == "1"
+
+# Cliente HTTP compartido, también creado y cerrado en el lifespan.
+# Uno solo para todo: así se reutilizan las conexiones (keep-alive).
+cliente_http: httpx.AsyncClient | None = None
+
+# Tope de descargas simultáneas entre todas las tareas, para no agotar
+# descriptores ni saturar a los servidores del otro lado
+limite_descargas = asyncio.Semaphore(
+    int(os.environ.get("DESCARGAS_MAX", "20")))
 
 
 async def esperar(parametros: dict[str, Any]) -> dict[str, Any]:
@@ -28,12 +40,28 @@ async def esperar(parametros: dict[str, Any]) -> dict[str, Any]:
     return {"durmio": segundos}
 
 
+async def bajar_una(url: str) -> dict[str, Any]:
+    """Descarga una URL. Si falla, devuelve el error en vez de lanzarlo."""
+    async with limite_descargas:
+        inicio = time.perf_counter()
+        try:
+            respuesta = await cliente_http.get(url)
+        except Exception as e:
+            # CancelledError no entra acá: hereda de BaseException
+            return {"url": url, "error": f"{type(e).__name__}: {e}",
+                    "segundos": time.perf_counter() - inicio}
+        return {"url": url,
+                "estado": respuesta.status_code,
+                "bytes": len(respuesta.content),
+                "segundos": time.perf_counter() - inicio}
+
+
 async def descargar(parametros: dict[str, Any]) -> list[dict[str, Any]]:
-    # TODO semana 2: descargar de verdad con httpx.AsyncClient + asyncio.gather
-    urls = parametros.get("urls", [])
-    await asyncio.sleep(0.5)
-    return [{"url": u, "estado": 200, "bytes": 0, "segundos": 0.5}
-            for u in urls]
+    urls = parametros.get("urls")
+    if not isinstance(urls, list) or not urls:
+        raise ValueError("urls tiene que ser una lista no vacía")
+    # Todas a la vez: tarda lo que la más lenta, no la suma
+    return await asyncio.gather(*(bajar_una(str(u)) for u in urls))
 
 
 def hash_iterado(texto: str, iteraciones: int) -> str:

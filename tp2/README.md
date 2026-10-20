@@ -3,8 +3,8 @@
 Servicio HTTP (FastAPI) que recibe tareas, las encola en una `asyncio.Queue`
 y las ejecuta con un pool de workers asíncronos.
 
-> Estado: **semana 1** — API, cola y workers andando. `esperar` es real;
-> `descargar` y `hashear` todavía devuelven datos simulados.
+> Estado: en desarrollo. Las tres tareas andan; falta cancelación de tareas
+> en ejecución, apagado ordenado, mediciones e informe.
 
 ## Cómo levantarlo
 
@@ -23,6 +23,8 @@ Variables de entorno (en `docker-compose.yml`):
 | `TIMEOUT_DEFAULT` | 30 | Timeout en segundos si la tarea no trae uno |
 | `COLA_MAX` | 100 | Tareas que pueden esperar en la cola; si se llena, `POST` responde 503 |
 | `PROCESOS` | cantidad de CPUs | Procesos del `ProcessPoolExecutor` para `hashear` |
+| `TIMEOUT_HTTP` | 10 | Timeout en segundos de cada URL en `descargar` |
+| `DESCARGAS_MAX` | 20 | Descargas simultáneas como máximo (entre todas las tareas) |
 | `HASH_SIN_EXECUTOR` | 0 | Con `1`, `hashear` corre en el event loop (para medir el bloqueo) |
 
 ## Ejemplos

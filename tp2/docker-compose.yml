@@ -9,6 +9,8 @@ services:
       - COLA_MAX=100
       - PROCESOS=2
       - HASH_SIN_EXECUTOR=0
+      - TIMEOUT_HTTP=10
+      - DESCARGAS_MAX=20
       - PYTHONUNBUFFERED=1
     # SIGTERM le da 15 s al apagado ordenado antes del SIGKILL
     stop_grace_period: 15s

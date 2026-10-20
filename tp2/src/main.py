@@ -6,6 +6,7 @@ import os
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
 
+import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 
@@ -20,6 +21,7 @@ WORKERS = int(os.environ.get("WORKERS", "4"))
 TIMEOUT_DEFAULT = float(os.environ.get("TIMEOUT_DEFAULT", "30"))
 COLA_MAX = int(os.environ.get("COLA_MAX", "100"))
 PROCESOS = int(os.environ.get("PROCESOS", str(os.cpu_count() or 2)))
+TIMEOUT_HTTP = float(os.environ.get("TIMEOUT_HTTP", "10"))
 
 pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT,
                    cola_max=COLA_MAX)
@@ -29,9 +31,12 @@ pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT,
 async def lifespan(app: FastAPI):
     # Todo se crea acá, con el event loop de uvicorn ya corriendo
     tareas.pool_cpu = ProcessPoolExecutor(max_workers=PROCESOS)
+    tareas.cliente_http = httpx.AsyncClient(timeout=TIMEOUT_HTTP,
+                                            follow_redirects=True)
     pool.iniciar()
     yield
     await pool.detener()
+    await tareas.cliente_http.aclose()
     # shutdown(wait=True) bloquea: lo mando a un thread para no frenar el loop
     await asyncio.to_thread(tareas.pool_cpu.shutdown, wait=True,
                             cancel_futures=True)
