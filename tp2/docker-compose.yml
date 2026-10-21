@@ -12,7 +12,11 @@ services:
       - TIMEOUT_HTTP=10
       - DESCARGAS_MAX=20
       - APAGADO_MAX=10
+      - ESTADO_DIR=/app/estados
       - PYTHONUNBUFFERED=1
+    # Los volcados quedan en tp2/estados/ del host y sobreviven al contenedor
+    volumes:
+      - ./estados:/app/estados
     # Tras SIGTERM, Docker espera 15 s antes del SIGKILL: APAGADO_MAX (10 s)
     # tiene que entrar holgado ahí
     stop_grace_period: 15s

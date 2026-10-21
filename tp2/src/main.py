@@ -5,11 +5,13 @@ import logging
 import os
 from concurrent.futures import ProcessPoolExecutor
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
 
+import persistencia
 import tareas
 from cola import Apagando, PoolWorkers
 from modelos import ESTADOS_FINALES, Estado, TareaEntrada
@@ -24,6 +26,7 @@ PROCESOS = int(os.environ.get("PROCESOS", str(os.cpu_count() or 2)))
 TIMEOUT_HTTP = float(os.environ.get("TIMEOUT_HTTP", "10"))
 # Menor que el stop_grace_period de Docker (15 s), que después manda SIGKILL
 APAGADO_MAX = float(os.environ.get("APAGADO_MAX", "10"))
+ESTADO_DIR = Path(os.environ.get("ESTADO_DIR", "estados"))
 
 pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT,
                    cola_max=COLA_MAX)
@@ -31,6 +34,7 @@ pool = PoolWorkers(cantidad=WORKERS, timeout_default=TIMEOUT_DEFAULT,
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    persistencia.reportar_previo(ESTADO_DIR)
     # Todo se crea acá, con el event loop de uvicorn ya corriendo
     tareas.pool_cpu = ProcessPoolExecutor(max_workers=PROCESOS)
     tareas.cliente_http = httpx.AsyncClient(timeout=TIMEOUT_HTTP,
@@ -40,6 +44,13 @@ async def lifespan(app: FastAPI):
     # Acá llegamos cuando uvicorn recibe SIGINT/SIGTERM: ya dejó de aceptar
     # conexiones y terminó los pedidos HTTP en curso
     forzado = await pool.detener(limite=APAGADO_MAX)
+    # Ya no queda nada pendiente ni corriendo: todas en estado final
+    try:
+        await persistencia.volcar(ESTADO_DIR,
+                                  [t.a_dict() for t in pool.listar()],
+                                  pool.estadisticas())
+    except OSError:
+        logging.exception("No se pudo volcar el estado")
     await tareas.cliente_http.aclose()
     if forzado:
         # Un hash que ya arrancó no se puede cancelar: hay que matar los

@@ -3,8 +3,8 @@
 Servicio HTTP (FastAPI) que recibe tareas, las encola en una `asyncio.Queue`
 y las ejecuta con un pool de workers asíncronos.
 
-> Estado: en desarrollo. Falta el volcado a JSON, las mediciones y el
-> informe.
+> Estado: en desarrollo. Lo obligatorio del sistema está completo; faltan
+> las mediciones y el informe.
 
 ## Cómo levantarlo
 
@@ -26,6 +26,7 @@ Variables de entorno (en `docker-compose.yml`):
 | `TIMEOUT_HTTP` | 10 | Timeout en segundos de cada URL en `descargar` |
 | `DESCARGAS_MAX` | 20 | Descargas simultáneas como máximo (entre todas las tareas) |
 | `APAGADO_MAX` | 10 | Segundos que el apagado espera a las tareas en curso |
+| `ESTADO_DIR` | `estados` | Carpeta de los volcados `estado_<timestamp>.json` |
 | `HASH_SIN_EXECUTOR` | 0 | Con `1`, `hashear` corre en el event loop (para medir el bloqueo) |
 
 ## Ejemplos
@@ -60,7 +61,9 @@ tp2/
 │   ├── main.py      # API FastAPI y arranque (lifespan)
 │   ├── cola.py      # PoolWorkers: asyncio.Queue + N corrutinas worker
 │   ├── tareas.py    # Implementación de cada tipo de tarea
+│   ├── persistencia.py  # Volcado a JSON al apagar y aviso al arrancar
 │   └── modelos.py   # Estados, Tarea y el cuerpo del POST
+├── estados/         # Volcados (se crea solo, no se sube al repo)
 ├── Dockerfile
 ├── docker-compose.yml
 └── requirements.txt
