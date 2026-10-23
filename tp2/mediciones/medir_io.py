@@ -28,10 +28,18 @@ def correr(cliente: httpx.Client, modo: str, urls: list[str]) -> dict:
     })
     r.raise_for_status()
     tarea_id = r.json()["id"]
+    inicio = time.monotonic()
+    aviso = 5
     while True:
         tarea = cliente.get(f"/tareas/{tarea_id}").json()
         if tarea["estado"] not in ("pendiente", "ejecutando"):
+            print(" " * 40, end="\r")  # borra la línea de progreso
             return tarea
+        transcurrido = time.monotonic() - inicio
+        if transcurrido >= aviso:
+            # El secuencial puede tardar un minuto: que se vea que avanza
+            print(f"    {modo}: {transcurrido:.0f} s...", end="\r", flush=True)
+            aviso += 5
         time.sleep(0.1)
 
 
@@ -49,6 +57,8 @@ def main() -> None:
     urls = [f"{args.url}{sep}i={i}" for i in range(args.n)]
     tiempos: dict[str, list[float]] = {"secuencial": [], "concurrente": []}
 
+    print(f"{args.n} descargas de {args.url}, {args.repeticiones} repeticiones."
+          f" El secuencial tarda unas {args.n} veces más que el concurrente.")
     with httpx.Client(base_url=args.api, timeout=30) as cliente:
         for rep in range(1, args.repeticiones + 1):
             for modo in tiempos:
