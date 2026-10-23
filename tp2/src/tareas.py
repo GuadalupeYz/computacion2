@@ -60,7 +60,14 @@ async def descargar(parametros: dict[str, Any]) -> list[dict[str, Any]]:
     urls = parametros.get("urls")
     if not isinstance(urls, list) or not urls:
         raise ValueError("urls tiene que ser una lista no vacía")
-    # Todas a la vez: tarda lo que la más lenta, no la suma
+    modo = parametros.get("modo", "concurrente")
+    if modo == "secuencial":
+        # Un for con await: cada descarga arranca recién cuando terminó la
+        # anterior, así que tarda la suma. Existe para la medición 1.
+        return [await bajar_una(str(u)) for u in urls]
+    if modo != "concurrente":
+        raise ValueError("modo tiene que ser 'concurrente' o 'secuencial'")
+    # gather: todas a la vez, tarda lo que la más lenta y no la suma
     return await asyncio.gather(*(bajar_una(str(u)) for u in urls))
 
 
