@@ -8,7 +8,8 @@ services:
       - TIMEOUT_DEFAULT=30
       - COLA_MAX=100
       - PROCESOS=2
-      - HASH_SIN_EXECUTOR=0
+      # Se puede pisar desde la terminal: HASH_SIN_EXECUTOR=1 docker compose up -d
+      - HASH_SIN_EXECUTOR=${HASH_SIN_EXECUTOR:-0}
       - TIMEOUT_HTTP=10
       - DESCARGAS_MAX=20
       - APAGADO_MAX=10
