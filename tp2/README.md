@@ -70,6 +70,108 @@ tp2/
 └── requirements.txt
 ```
 
+## Arquitectura
+
+### Componentes
+
+```
+                   ┌──────────────────────────────────────────────────────┐
+                   │  Proceso principal: uvicorn + un solo event loop     │
+                   │                                                      │
+  Cliente HTTP ───>│  API FastAPI (main.py)                               │
+                   │   POST   /tareas        202 · 422 · 503              │
+                   │   GET    /tareas        ?estado=...                  │
+                   │   GET    /tareas/{id}   404                          │
+                   │   DELETE /tareas/{id}   404 · 409                    │
+                   │   GET    /estadisticas                               │
+                   │        │ put_nowait(id)            ▲ lee el estado   │
+                   │        v                           │                 │
+                   │  asyncio.Queue(maxsize=COLA_MAX)   │                 │
+                   │        │ await get()               │                 │
+                   │        v                           │                 │
+                   │  N workers (corrutinas) ───────> dict id -> Tarea    │
+                   │        │  cada tarea corre en su propia asyncio.Task │
+                   │        │  con wait_for(timeout)                      │
+                   │        ├── esperar:   await asyncio.sleep            │
+                   │        ├── descargar: httpx.AsyncClient + gather     │
+                   │        │              + Semaphore(DESCARGAS_MAX)     │
+                   │        └── hashear:   await run_in_executor ──┐      │
+                   └───────────────────────────────────────────────┼──────┘
+                                                                   v
+                                          ProcessPoolExecutor (PROCESOS hijos)
+                                          hash_iterado() en paralelo, fuera
+                                          del event loop
+
+  Al apagar:  dict id -> Tarea ──> estados/estado_<timestamp>.json
+```
+
+Todo lo de la caja corre en **un solo hilo**: la API, la cola, los workers y
+las descargas son corrutinas que comparten el event loop. Lo único que sale
+de ese hilo es el cálculo de `hashear`, que va a procesos aparte.
+
+### Flujo de una tarea
+
+1. **`POST /tareas`.** Pydantic valida el cuerpo (si el tipo no existe, 422).
+   `encolar()` crea la `Tarea` en estado `pendiente` y hace `put_nowait` de su
+   id en la cola. Si la cola está llena, responde 503. Si entró, responde
+   **202 al instante**: el endpoint nunca espera a que la tarea se ejecute.
+2. **Un worker la saca** con `await cola.get()`. Mientras la cola está vacía,
+   los workers están suspendidos en ese `await` sin consumir CPU.
+3. **Si la cancelaron mientras esperaba**, el worker la descarta. Si no, la
+   pasa a `ejecutando` y lanza la ejecución como una `asyncio.Task` propia,
+   envuelta en `asyncio.wait_for(..., timeout)`, y la guarda en `_en_curso`
+   para que `DELETE` pueda encontrarla.
+4. **La ejecución corre.** Cada `await` adentro (el `sleep`, la respuesta de
+   la red, el *future* del executor) es un punto donde el loop atiende a los
+   demás: otros workers, otros pedidos HTTP.
+5. **Termina** de una de cuatro formas: devuelve un resultado (`completada`),
+   lanza una excepción o vence el timeout (`fallida`, con el motivo en
+   `error`), o la cancelan (`cancelada`). En el `finally` el worker la saca de
+   `_en_curso`, baja el contador de ocupados y llama a `task_done()`. Después
+   vuelve a `await cola.get()` por la siguiente.
+6. **El cliente consulta** con `GET /tareas/{id}` cuando quiere: el estado y el
+   resultado están en el diccionario en memoria.
+
+### Estados
+
+```
+                  DELETE (descartada al salir de la cola)
+           ┌──────────────────────────────────────────────┐
+           │                                              v
+      pendiente ──> ejecutando ──> completada         cancelada
+                        │                                 ^
+                        ├──> fallida  (excepción o timeout)
+                        │                                 │
+                        └─────────────────────────────────┘
+                          DELETE, o apagado con el límite vencido
+```
+
+`completada`, `fallida` y `cancelada` son finales: un `DELETE` sobre una
+tarea en esos estados responde 409.
+
+### Ciclo de vida del servidor
+
+**Al arrancar** (`lifespan`, antes del `yield`):
+
+1. Se informa por log si hay un volcado previo en `estados/`.
+2. Se crean una sola vez el `ProcessPoolExecutor` y el `httpx.AsyncClient`,
+   que se reutilizan durante toda la vida del servidor.
+3. Se lanzan los `WORKERS` workers con `asyncio.create_task`.
+
+**Al recibir `SIGTERM` o `SIGINT`** (`docker compose down`, Ctrl+C):
+
+1. uvicorn deja de aceptar conexiones, termina los pedidos HTTP en curso y
+   ejecuta la parte de apagado del `lifespan`.
+2. El pool deja de aceptar tareas (`POST` responde 503) y marca como
+   canceladas las que seguían pendientes.
+3. Pone un centinela por worker en la cola. Cada worker termina la tarea que
+   tenía y sale cuando saca el centinela.
+4. Espera a los workers hasta `APAGADO_MAX` segundos. Si alguno no terminó,
+   lo cancela, y su tarea queda `cancelada por apagado`. Si había un hash en
+   curso, mata los procesos hijos con `SIGKILL`.
+5. Vuelca el estado a `estados/estado_<timestamp>.json`.
+6. Cierra el cliente HTTP y el executor.
+
 ## Mediciones
 
 Todas las corrí en mi máquina, con `docker compose up` y la configuración
