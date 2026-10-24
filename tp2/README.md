@@ -172,6 +172,148 @@ tarea en esos estados responde 409.
 5. Vuelca el estado a `estados/estado_<timestamp>.json`.
 6. Cierra el cliente HTTP y el executor.
 
+## Decisiones de diseño
+
+### ¿Por qué `asyncio.Queue` y no `queue.Queue`?
+
+Porque las dos esperan de forma muy distinta. `queue.Queue.get()` bloquea
+**el hilo** hasta que haya un elemento. Acá hay un solo hilo, el del event
+loop, así que un worker esperando en una `queue.Queue` vacía congelaría la
+API, los demás workers y todo lo demás. `queue.Queue` está pensada para
+threads: sus locks internos coordinan hilos que el sistema operativo puede
+interrumpir en cualquier momento.
+
+`await asyncio.Queue.get()` en cambio **suspende solo esa corrutina** y le
+devuelve el control al loop. Los cuatro workers pueden estar esperando
+trabajo a la vez sin consumir CPU ni frenar a nadie, y cuando la API hace
+`put_nowait` el loop despierta a uno.
+
+Por la misma razón el pool **no necesita `Lock`**: todo corre en un hilo y
+el loop solo cambia de corrutina en un `await`. Las secciones que tocan
+estado compartido (el diccionario de tareas, `_en_curso`, el contador de
+ocupados) no tienen ningún `await` en el medio, así que son atómicas por
+construcción. Si algún día hiciera falta un `await` entre leer y escribir
+ese estado, ahí sí habría que usar `asyncio.Lock` (clase 20).
+
+### Cola con límite: 503 en vez de crecer sin fin
+
+La cola se crea con `maxsize=COLA_MAX`. Sin límite, un cliente que manda
+tareas más rápido de lo que se procesan haría crecer la memoria hasta
+agotarla. Con límite, el sistema rechaza lo que no va a poder hacer: es el
+*backpressure* de la clase 21.
+
+En `encolar()` uso `put_nowait()` y atrapo `asyncio.QueueFull` para
+responder 503, en vez de `await put()`. Con `await put()` el pedido HTTP se
+quedaría esperando a que se libere un lugar, y el enunciado pide que el
+`POST` responda en el acto. Además la tarea se registra en el diccionario
+**después** de entrar en la cola: si fuera al revés, una tarea rechazada
+quedaría `pendiente` para siempre.
+
+### ¿Cómo evito que una tarea CPU-bound congele la API?
+
+`hashear` llama a `hash_iterado`, una función común sin ningún `await`, a
+través de `loop.run_in_executor(pool_cpu, hash_iterado, texto, iteraciones)`.
+El cálculo corre en un proceso hijo del `ProcessPoolExecutor` y la corrutina
+solo hace `await` sobre el *future*: mientras espera, el loop sigue atendiendo
+pedidos. La medición 2 lo muestra con números: sin executor el peor GET tardó
+6539 ms, con executor 7.9 ms.
+
+Elegí **procesos y no threads** (`asyncio.to_thread`) por el GIL: con threads,
+un solo hash tampoco congelaría el loop, pero varios hashes a la vez se
+turnarían para ejecutar bytecode y no correrían en paralelo. Con procesos,
+cada uno tiene su intérprete y su GIL, y usan núcleos distintos (la medición
+3 lo muestra: dos hashes tardan lo mismo que uno).
+
+Dos detalles más:
+
+- El pool se crea **una sola vez** en el `lifespan` y no por pedido: crear
+  procesos es caro.
+- `hash_iterado` es una función de módulo y no una lambda porque se manda al
+  proceso hijo *pickleada*, y una lambda no se puede serializar.
+
+### ¿Cómo implementé la cancelación, y qué pasa con los recursos a medio usar?
+
+El worker no ejecuta la tarea directamente con `await`: la lanza como una
+`asyncio.Task` propia y la guarda en `_en_curso[id]`. Así `DELETE` puede
+cancelar **solo el trabajo**, y el worker sigue vivo para tomar la siguiente
+tarea de la cola.
+
+- **Si la tarea está `pendiente`**, `DELETE` la marca `cancelada` y listo: no
+  la saca de la cola, pero el worker la descarta cuando la encuentra.
+- **Si está `ejecutando`**, `DELETE` llama a `task.cancel()`, que inyecta un
+  `CancelledError` en el próximo `await` de la ejecución. `cancel()` devuelve
+  `False` si la tarea acababa de terminar, y en ese caso no la marco como
+  cancelada.
+- **El worker distingue quién canceló** con `asyncio.current_task().cancelling()`.
+  Si es 0, la cancelación era para la tarea (vino de `DELETE`) y el worker
+  sigue. Si es mayor que 0, lo están cancelando a él porque se apaga el
+  servidor: marca la tarea y **relanza** el `CancelledError`. Tragárselo
+  dejaría al worker vivo y el apagado colgado (clase 20).
+- **El `finally`** saca la tarea de `_en_curso` y baja el contador de ocupados
+  pase lo que pase, así no quedan referencias colgadas.
+
+Qué pasa con los recursos según el tipo de tarea:
+
+| Tarea | Al cancelarla |
+|-------|---------------|
+| `esperar` | El `asyncio.sleep` se interrumpe en el acto |
+| `descargar` | El `CancelledError` entra en el `await cliente_http.get(...)`. httpx cierra esa conexión, `gather` cancela las demás descargas de la tarea, y el `async with` del semáforo lo libera al salir. No queda ninguna corrutina huérfana |
+| `hashear` | La tarea queda `cancelada` y el worker se libera enseguida, pero el proceso hijo **termina ese hash igual**: a un proceso que está calculando no se le puede inyectar una excepción. Mientras tanto ocupa uno de los `PROCESOS` |
+
+El timeout funciona con el mismo mecanismo: `asyncio.wait_for` cancela la
+ejecución cuando vence y lanza `TimeoutError`, que el worker convierte en
+`fallida` con el motivo en `error`.
+
+Al apagar, si se vence `APAGADO_MAX` con un hash en curso, mato los procesos
+hijos con `kill()` (`SIGKILL`) y no con `terminate()` (`SIGTERM`). Los hijos
+nacen con `fork` y **heredan los handlers de señales del padre**, o sea el de
+uvicorn, que ante `SIGTERM` solo prende una bandera y no sale. Lo descubrí
+porque el apagado tardaba 43 s en vez de 1. `SIGKILL` lo maneja el kernel y no
+se puede atrapar.
+
+### ¿Qué pasa si un worker lanza una excepción no capturada?
+
+Hay dos niveles:
+
+1. **Si falla la tarea** (parámetros inválidos como `urls` vacía,
+   `iteraciones` negativas o un `modo` que no existe), la excepción sale de
+   la ejecución y `_ejecutar` la atrapa con `except Exception`: la tarea pasa
+   a `fallida` con el tipo y el mensaje del error en el campo `error`. El
+   cliente lo ve en `GET /tareas/{id}`. Los errores de red de `descargar` son
+   un caso aparte: se registran por URL dentro del resultado, para que una URL
+   caída no tire abajo las otras 19.
+2. **Si falla algo del propio worker** fuera de eso, el bucle de `_worker`
+   tiene otro `except Exception` que lo registra con `log.exception` (con el
+   traceback completo) y sigue con la próxima tarea. El `task_done()` está en
+   un `finally`, así que el contador de la cola baja igual.
+
+Sin esto, una excepción terminaría la corrutina del worker en silencio: la
+`Task` guardaría la excepción y nadie la miraría nunca, igual que los `Future`
+que nadie consulta en el pool de la clase 14. El pool quedaría con un worker
+menos sin que nadie se entere. `CancelledError` no entra en esos `except`
+porque hereda de `BaseException`, así que la cancelación nunca se pierde.
+
+### ¿Por qué httpx y no aiohttp?
+
+Las dos son clientes HTTP asíncronos y cualquiera cumple el requisito de no
+bloquear el loop (`requests` no, porque es sincrónica). Elegí **httpx**
+porque:
+
+- Su API es casi la de `requests` (`cliente.get(url)`, `respuesta.status_code`),
+  así que el código se lee fácil.
+- Es la que usamos en la clase 20, y FastAPI la usa para sus pruebas.
+- Tiene timeouts configurables en el cliente y un pool de conexiones con
+  keep-alive, que se nota en la medición 1.
+
+aiohttp suele rendir algo mejor con miles de conexiones simultáneas, pero acá
+el tope es `DESCARGAS_MAX` = 20 y esa diferencia no importa.
+
+El cliente se crea **una vez** en el `lifespan` y lo comparten todas las
+tareas, con un timeout por URL (`TIMEOUT_HTTP`) para que un servidor que no
+responde no cuelgue la tarea. Un `asyncio.Semaphore(DESCARGAS_MAX)` global
+limita las descargas simultáneas **entre todas las tareas**: sin él, 10 tareas
+de 20 URLs abrirían 200 conexiones a la vez.
+
 ## Mediciones
 
 Todas las corrí en mi máquina, con `docker compose up` y la configuración
