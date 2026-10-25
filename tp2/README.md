@@ -440,5 +440,91 @@ los dos tipos de tarea, porque el techo no está en el mismo lugar.
   cantidad de núcleos no ayuda, porque los procesos se turnan en los mismos
   núcleos.
 
-<!-- Pendiente: diagrama, decisiones de diseño, conceptos del curso,
-limitaciones y lo que aprendí. -->
+## Conceptos del curso aplicados
+
+**Productor-consumidor con corrutinas (clases 11 y 21).** El pool de workers
+consume de una `asyncio.Queue` compartida (`cola.py`, `_worker`). Es el mismo
+patrón productor-consumidor de la clase 11, pero con corrutinas en vez de
+threads: la API produce con `put_nowait` y los workers consumen con
+`await get()`. Acá no hace falta lock porque el event loop no interrumpe
+entre `await`s, y ninguna sección que toca el estado compartido tiene un
+`await` en el medio. El `task_done()` va en un `finally`, como se recomienda
+en la clase 21, para que el contador de la cola baje aunque la tarea falle.
+
+**Backpressure (clases 20 y 21).** `asyncio.Queue(maxsize=COLA_MAX)` cumple el
+mismo rol que el `drain()` de la clase 20: frenar al productor cuando el
+consumidor no da abasto. En vez de esperar, la API rechaza con 503: un
+servidor que recibe pedidos de afuera no debería aceptar trabajo que no va a
+poder hacer.
+
+**El event loop y la cooperación (clases 17 y 18).** Cada `await` del código es
+un punto donde la corrutina cede el control, igual que el `yield` del
+scheduler cooperativo que construimos con generadores en la clase 18. Por
+eso `tareas.esperar` usa `await asyncio.sleep()`: un `time.sleep()` no
+cedería y congelaría al resto, que es exactamente lo que muestra la medición
+2 con `hash_iterado` corriendo en el loop. Por debajo, el loop de uvicorn es un
+`_UnixSelectorEventLoop`: usa `epoll`, el multiplexing de la clase 17, para
+dormir hasta que algún socket tenga datos.
+
+**HTTP y FastAPI (clase 19).** Los códigos de respuesta siguen la división
+de la clase 19 entre error del cliente y del servidor: 202 para una tarea
+aceptada pero no terminada, 404 si no existe, 409 si se intenta cancelar algo
+ya finalizado, 422 cuando Pydantic rechaza el cuerpo y 503 cuando el servidor
+no puede aceptar más (cola llena o apagándose). Todos los endpoints son
+`async def` y ninguno bloquea: la clase 19 mostró que un `async def` con algo
+bloqueante adentro es peor que un `def` común.
+
+**Concurrencia de clientes con `gather` y `Semaphore` (clases 11 y 20).**
+`tareas.descargar` lanza todas las descargas con `asyncio.gather`, el patrón
+de la clase 20 para clientes concurrentes, y las acota con un
+`asyncio.Semaphore`, la misma primitiva de la clase 11 en su versión async.
+El `httpx.AsyncClient` se crea una sola vez y lleva timeout, las dos reglas
+que da la clase 20 (reutilizar conexiones por el keep-alive de la clase 19, y
+no confiar en que la red responda, la falacia de la clase 12).
+
+**Cancelación y timeouts (clase 20).** `DELETE` usa `task.cancel()`, que no
+mata nada: inyecta un `CancelledError` en el próximo `await`. De ahí sale la
+limitación de `hashear`: un cálculo que no cede no se puede cancelar. El
+worker relanza el `CancelledError` cuando la cancelación es para él, como
+pide la clase 20, y limpia en un `finally`. El timeout de cada tarea es
+`asyncio.wait_for`, que por dentro también es una cancelación.
+
+**I/O-bound contra CPU-bound, y el GIL (clases 10, 14 y 21).** Las descargas
+son I/O-bound: pasan casi todo el tiempo esperando, y eso asyncio lo resuelve
+en un solo hilo. El hash es CPU-bound: asyncio no lo puede repartir, porque
+hay un solo hilo. Por eso va a un `ProcessPoolExecutor` y no a un thread: con
+el GIL de la clase 10, varios threads calculando se turnan y no corren en
+paralelo. Es la tabla de decisión de las clases 14 y 21 aplicada.
+
+**Executors y `Future` (clases 14, 21 y 22).** `run_in_executor` devuelve un
+*future* sobre el que la corrutina hace `await`. El executor se crea una vez
+en el `lifespan` (clase 21) y sus argumentos viajan pickleados, por eso
+`hash_iterado` es una función de módulo. El `except Exception` con
+`log.exception` del worker evita el problema de la clase 14: una excepción
+guardada en un `Future` que nadie mira desaparece sin dejar rastro.
+
+**Procesos, `fork` y señales (clases 4 y 6).** El apagado ordenado reúne
+varias cosas del primer bloque. uvicorn instala un handler de `SIGTERM` y
+`SIGINT` que solo marca un pedido de cierre, y el loop lo procesa después,
+entre tareas: es la regla de la clase 6 (el handler hace lo mínimo) y la
+misma idea que `loop.add_signal_handler` en la clase 20. Por eso el apagado
+lo hago en el `lifespan` y no instalo handlers propios, que pisarían los de
+uvicorn. Los workers del executor
+son procesos hijos creados con `fork` (clase 4), y por eso heredan los
+handlers de señales del padre: un `SIGTERM` no los terminaba, y hubo que
+usar `SIGKILL`, que no se puede atrapar.
+
+**Centinela para el apagado (clase 21).** Para parar los workers sin cortar lo
+que están haciendo, `detener()` pone en la cola un `CENTINELA = object()` por
+worker. Es un objeto único que se compara con `is`, así que nada que llegue
+por la API se puede confundir con él. Cancelar a los workers queda como plan
+B, solo si se vence `APAGADO_MAX`.
+
+**Descriptores y el problema C10K (clases 13, 14 y 17).** Cada descarga abre
+un socket, y cada socket consume un descriptor de archivo, un recurso
+limitado por proceso (`ulimit -n`, clase 14). El semáforo de descargas y el
+límite de la cola evitan que miles de tareas agoten los descriptores.
+Atender muchas esperas en un solo hilo, en vez de un thread por cliente, es
+la respuesta al problema C10K que planteó la clase 14.
+
+<!-- Pendiente: limitaciones y lo que aprendí. -->
