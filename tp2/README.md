@@ -527,4 +527,59 @@ límite de la cola evitan que miles de tareas agoten los descriptores.
 Atender muchas esperas en un solo hilo, en vez de un thread por cliente, es
 la respuesta al problema C10K que planteó la clase 14.
 
-<!-- Pendiente: limitaciones y lo que aprendí. -->
+## Limitaciones conocidas
+
+**Cancelar un `hashear` no frena el cálculo.** La tarea queda `cancelada` y el
+worker se libera enseguida, pero el proceso hijo sigue calculando hasta
+terminar: a un proceso que no tiene `await` no se le puede inyectar una
+excepción. Mientras tanto ocupa uno de los `PROCESOS`, y el próximo hash
+espera. Solo al apagar se matan los procesos con `SIGKILL`.
+
+**El estado vive en un solo proceso.** Las tareas están en un diccionario en
+memoria. Si se levantara uvicorn con `--workers 4`, habría cuatro procesos
+con cuatro diccionarios distintos, y un `GET /tareas/{id}` podría caer en un
+proceso que no conoce esa tarea (clase 19). Para escalar a varios procesos
+haría falta sacar el estado a algo compartido, como una base de datos o
+Redis, que el enunciado no permite.
+
+**El volcado solo protege ante un apagado ordenado.** Si el proceso muere por
+`SIGKILL`, un crash o un corte de luz, el estado se pierde entero. Además, al
+arrancar el volcado previo solo se informa por log, no se recarga.
+
+**Las tareas terminadas nunca se borran.** El diccionario crece con cada tarea
+y no hay limpieza, así que con suficientes tareas la memoria crece sin
+límite.
+
+**`GET /tareas` no tiene paginación.** Devuelve todas las tareas, y armar ese
+JSON es trabajo de CPU que corre en el event loop. Con decenas de miles de
+tareas, cada `GET /tareas` frenaría al resto durante ese tiempo: un bloqueo
+pequeño, pero del mismo tipo que el de la medición 2.
+
+**Las tareas canceladas en la cola siguen ocupando lugar.** Al cancelar una
+tarea pendiente, se marca pero no se saca de la `asyncio.Queue`: el lugar se
+libera recién cuando un worker la saca y la descarta. Con muchas
+cancelaciones, la cola puede responder 503 estando llena de tareas que nunca
+se van a ejecutar.
+
+**Bloqueo de cabeza de fila entre tipos de tarea.** Con `WORKERS=4` y
+`PROCESOS=2`, si llegan cuatro hashes, dos workers quedan esperando un proceso
+libre. Un `esperar` o un `descargar` que llega detrás espera también, aunque
+no necesite CPU. Una solución sería tener colas o workers separados por tipo
+de tarea.
+
+**La cola es FIFO, sin prioridades.** Una tarea urgente espera detrás de
+todas las que llegaron antes.
+
+**El timeout cuenta solo la ejecución.** Una tarea con `timeout: 5` puede
+pasar un minuto en la cola y después ejecutarse 5 segundos sin fallar. El
+tiempo total de respuesta no está acotado.
+
+**No hay límite por cliente.** Un solo cliente puede llenar la cola y dejar a
+todos los demás recibiendo 503.
+
+**El `kill()` del apagado usa un atributo interno.** Para matar los procesos
+hijos accedo a `ProcessPoolExecutor._processes`, que no es parte de la API
+pública y podría cambiar entre versiones de Python. Desde Python 3.14 existe
+`terminate_workers()`, que es la forma oficial.
+
+<!-- Pendiente: lo que aprendí (lo escribo yo). -->
