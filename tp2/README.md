@@ -363,7 +363,8 @@ del contenedor, así no hace falta instalar nada en el host:
 docker compose exec api python mediciones/<script>.py
 ```
 
-<!-- Completar: modelo de CPU y cantidad de núcleos (salida de `lscpu` / `nproc`) -->
+**Máquina:** Intel Core i7-7500U @ 2.70 GHz, 2 núcleos físicos con
+*hyperthreading* (`nproc` informa 4 hilos de hardware).
 
 ### 1. Concurrencia I/O: 20 descargas secuenciales contra 20 concurrentes
 
@@ -474,9 +475,10 @@ los dos tipos de tarea, porque el techo no está en el mismo lugar.
 - **Con `hashear`, el límite es `PROCESOS` = 2, no los 4 workers.** Dos hashes
   tardan lo mismo que uno, pero con 4 el tiempo ya se duplica: el tercero
   espera un proceso libre aunque haya un worker desocupado. Acá el cuello de
-  botella es el CPU, y lo fija el hardware: subir `PROCESOS` por encima de la
-  cantidad de núcleos no ayuda, porque los procesos se turnan en los mismos
-  núcleos.
+  botella es el CPU, y lo fija el hardware: mi procesador tiene 2 núcleos
+  físicos, así que con `PROCESOS=2` ya los uso a los dos. Subir `PROCESOS` a 4
+  ayudaría poco, porque los hilos extra del *hyperthreading* comparten las
+  unidades de cálculo de esos mismos 2 núcleos.
 
 ## Conceptos del curso aplicados
 
