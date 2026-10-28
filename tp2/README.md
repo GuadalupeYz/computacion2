@@ -53,6 +53,42 @@ curl -X DELETE localhost:8000/tareas/<id>     # cancelar
 curl localhost:8000/estadisticas
 ```
 
+## Tests (bonus)
+
+Hay 24 tests con `pytest-asyncio` en `tests/`, sobre todo de cancelación.
+Usan el pool directamente, sin HTTP, para controlar el momento exacto de cada
+cancelación, y las descargas van contra un servidor falso
+(`httpx.MockTransport`), así no dependen de internet. Se corren dentro del
+contenedor:
+
+```bash
+docker compose exec api pytest -v
+```
+
+Qué cubren:
+
+- **Ejecución:** resultados correctos, `gather` contra `for` con `await`, el
+  semáforo que limita las descargas, una URL rota que no tira abajo a las
+  demás, parámetros inválidos, cola llena sin tareas fantasma, y excepciones
+  en la tarea o en el worker que no lo matan.
+- **El loop bloqueado:** una corrutina que quiere despertarse cada 10 ms mide
+  cuánto se atrasa mientras corre un hash. Con executor el atraso es de
+  milisegundos; sin executor, de casi todo el hash.
+- **Cancelación:** de una tarea pendiente (nunca se ejecuta), de un `esperar`,
+  de una descarga a mitad (el servidor falso registra que las dos descargas se
+  cancelaron, no quedan Tasks huérfanas y el semáforo queda libre) y de un
+  hash (el worker se libera aunque el proceso siga).
+- **Timeouts y apagado:** el timeout cancela la descarga; el apagado deja
+  terminar lo que entra en el límite, corta lo que se pasa, descarta lo
+  pendiente y después rechaza tareas nuevas; un worker cancelado relanza el
+  `CancelledError` y termina.
+
+Para comprobar que los tests detectan errores de verdad, rompí el código a
+propósito de dos formas: olvidar sacar la tarea de `_en_curso` en el
+`finally`, y tragarse el `CancelledError` en vez de relanzarlo. La segunda no
+la detectaba ningún test, porque en el apagado los centinelas rescataban al
+worker. Por eso agregué el test que cancela a los workers directamente.
+
 ## Estructura
 
 ```
@@ -64,9 +100,11 @@ tp2/
 │   ├── persistencia.py  # Volcado a JSON al apagar y aviso al arrancar
 │   └── modelos.py   # Estados, Tarea y el cuerpo del POST
 ├── mediciones/      # Scripts de las tres mediciones
+├── tests/           # Tests con pytest-asyncio (conftest.py con los fixtures)
 ├── estados/         # Volcados (se crea solo, no se sube al repo)
 ├── Dockerfile
 ├── docker-compose.yml
+├── pytest.ini
 └── requirements.txt
 ```
 
