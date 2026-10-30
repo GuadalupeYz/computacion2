@@ -3,9 +3,6 @@
 Servicio HTTP (FastAPI) que recibe tareas, las encola en una `asyncio.Queue`
 y las ejecuta con un pool de workers asíncronos.
 
-> Estado: en desarrollo. Lo obligatorio del sistema está completo; faltan
-> las mediciones y el informe.
-
 ## Cómo levantarlo
 
 ```bash
@@ -658,4 +655,36 @@ hijos accedo a `ProcessPoolExecutor._processes`, que no es parte de la API
 pública y podría cambiar entre versiones de Python. Desde Python 3.14 existe
 `terminate_workers()`, que es la forma oficial.
 
-<!-- Pendiente: lo que aprendí (lo escribo yo). -->
+## Lo que aprendí
+
+Lo de que asyncio sirve para esperar y no para calcular lo vimos en clase, y
+en el momento me pareció una idea medio teórica. Cuando lo llevé a la
+práctica lo entendí de verdad, porque se ve clarísimo en la medición 2. Con
+el hash corriendo dentro de la corrutina, la API respondió dos pedidos en más
+de seis segundos: para cualquiera que la usara, estaba colgada. Con el
+executor, en el mismo tiempo respondió más de siete mil. Ahí me cerró lo que
+decía el profe de que el event loop es uno solo y que si alguien no "suelta"
+el control con un `await`, todos los demás quedan esperando. Lo mismo con
+`time.sleep()` contra `asyncio.sleep()`: antes sabía que uno estaba mal y el
+otro bien, ahora sé por qué.
+
+La cancelación también la entendí mejor haciéndola. En clase vimos que
+`cancel()` no corta nada de golpe, sino que deja el error para el próximo
+`await`, y que si atrapás el `CancelledError` tenés que volver a lanzarlo.
+Eso se ve en el código: una descarga se corta enseguida porque está esperando
+la red, pero un hash que ya arrancó en otro proceso no se puede frenar. Y con
+los tests me pasó algo que me sirvió mucho: rompí el código a propósito
+sacando ese `raise` y ningún test fallaba, porque el apagado lo "salvaba" de
+casualidad con los centinelas. Tuve que agregar un test nuevo para que lo
+detectara. Me di cuenta de que un error así puede estar escondido mucho
+tiempo sin que nadie lo note.
+
+Por último, me gustó ver cómo se conectan temas de todo el año. En el TP1 usé
+procesos, colas y señales, y acá volvieron a aparecer pero mezclados con
+asyncio. Lo más claro fue cuando el apagado tardaba 43 segundos en vez de
+uno: los procesos hijos se crean con `fork`, heredan el manejo de señales del
+padre, y por eso ignoraban el `SIGTERM`. Eso lo habíamos visto en las clases
+de procesos y señales, y acá me lo encontré en un problema real. También me
+sorprendió que las descargas en paralelo fueran 9.8 veces más rápidas y no 20
+como esperaba: entendí que el resultado depende de la descarga más lenta y de
+la red, no solo del código.
