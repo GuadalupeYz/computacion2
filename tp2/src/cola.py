@@ -34,6 +34,7 @@ class PoolWorkers:
         # Lleva ids de tareas, o el CENTINELA al apagar
         self.cola: asyncio.Queue[Any] = asyncio.Queue(maxsize=cola_max)
         self.aceptando = True
+        self.rechazadas = 0  # tareas rechazadas con 503 (para /metrics)
         self.tareas: dict[str, Tarea] = {}
         self.ocupados = 0
         self._workers: list[asyncio.Task] = []
@@ -86,12 +87,17 @@ class PoolWorkers:
         si la cola está llena.
         """
         if not self.aceptando:
+            self.rechazadas += 1
             raise Apagando()
         tarea = Tarea(tipo=tipo, parametros=parametros,
                       timeout=timeout or self.timeout_default)
         # put_nowait en vez de await put(): si está llena, falla al instante
         # en lugar de dejar al cliente HTTP esperando un lugar
-        self.cola.put_nowait(tarea.id)
+        try:
+            self.cola.put_nowait(tarea.id)
+        except asyncio.QueueFull:
+            self.rechazadas += 1
+            raise
         # Recién se registra si entró, así no quedan tareas fantasma
         self.tareas[tarea.id] = tarea
         return tarea

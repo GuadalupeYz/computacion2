@@ -10,8 +10,9 @@ from pathlib import Path
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
-from fastapi.responses import RedirectResponse
+from fastapi.responses import PlainTextResponse, RedirectResponse
 
+import metricas
 import persistencia
 import tareas
 from cola import Apagando, PoolWorkers
@@ -118,6 +119,14 @@ async def cancelar_tarea(tarea_id: str):
 @app.get("/estadisticas")
 async def estadisticas():
     return pool.estadisticas()
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+async def metrics():
+    # Formato de texto de Prometheus (versión 0.0.4 del formato de exposición)
+    return PlainTextResponse(
+        metricas.formatear(pool),
+        media_type="text/plain; version=0.0.4; charset=utf-8")
 
 
 if __name__ == "__main__":

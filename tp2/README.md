@@ -51,11 +51,46 @@ curl 'localhost:8000/tareas?estado=ejecutando' # filtradas por estado
 curl localhost:8000/tareas/<id>               # una
 curl -X DELETE localhost:8000/tareas/<id>     # cancelar
 curl localhost:8000/estadisticas
+curl localhost:8000/metrics                   # formato Prometheus (bonus)
 ```
+
+La raíz `http://localhost:8000/` redirige a `/docs`, donde se pueden probar
+todos los endpoints desde el navegador.
+
+## Métricas en formato Prometheus (bonus)
+
+`GET /metrics` devuelve el estado del sistema en el formato de texto que lee
+Prometheus. Está hecho a mano en `src/metricas.py`, sin bibliotecas: el
+formato es una línea `# HELP` (qué mide), una `# TYPE` y una línea por valor.
+
+| Métrica | Tipo | Qué mide |
+|---------|------|----------|
+| `tareas_creadas_total` | counter | Tareas aceptadas desde el arranque |
+| `tareas_rechazadas_total` | counter | `POST` rechazados con 503 |
+| `tareas{tipo, estado}` | gauge | Tareas en cada estado, por tipo |
+| `tarea_duracion_segundos{tipo}` | summary | `_sum` y `_count` de las duraciones: con eso Prometheus calcula el promedio |
+| `workers`, `workers_ocupados` | gauge | Tamaño del pool y cuántos están trabajando |
+| `cola_en_espera`, `cola_capacidad` | gauge | Ocupación de la cola y su máximo |
+
+Un **counter** solo crece (Prometheus calcula su ritmo, por ejemplo tareas por
+segundo); un **gauge** sube y baja. `tareas_rechazadas_total` sirve para ver la
+medición 3 en vivo: cuando empieza a crecer, el pool llegó a su techo.
+
+```
+tareas{tipo="esperar",estado="ejecutando"} 2
+tareas{tipo="esperar",estado="pendiente"} 3
+tareas_rechazadas_total 2
+workers_ocupados 2
+cola_en_espera 3
+```
+
+`formatear()` no tiene ningún `await`: recorre todas las tareas de un tirón, así
+que ve una foto consistente del estado, sin que ninguna corrutina lo cambie a
+mitad del recorrido.
 
 ## Tests (bonus)
 
-Hay 24 tests con `pytest-asyncio` en `tests/`, sobre todo de cancelación.
+Hay 27 tests con `pytest-asyncio` en `tests/`, sobre todo de cancelación.
 Usan el pool directamente, sin HTTP, para controlar el momento exacto de cada
 cancelación, y las descargas van contra un servidor falso
 (`httpx.MockTransport`), así no dependen de internet. Se corren dentro del
@@ -98,6 +133,7 @@ tp2/
 │   ├── cola.py      # PoolWorkers: asyncio.Queue + N corrutinas worker
 │   ├── tareas.py    # Implementación de cada tipo de tarea
 │   ├── persistencia.py  # Volcado a JSON al apagar y aviso al arrancar
+│   ├── metricas.py  # Texto de /metrics en formato Prometheus
 │   └── modelos.py   # Estados, Tarea y el cuerpo del POST
 ├── mediciones/      # Scripts de las tres mediciones
 ├── tests/           # Tests con pytest-asyncio (conftest.py con los fixtures)
