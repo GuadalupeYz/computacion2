@@ -10,6 +10,7 @@ from pathlib import Path
 import httpx
 import uvicorn
 from fastapi import FastAPI, HTTPException, status
+from fastapi.responses import RedirectResponse
 
 import persistencia
 import tareas
@@ -67,6 +68,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Plataforma de tareas distribuidas", lifespan=lifespan)
+
+
+@app.get("/", include_in_schema=False)
+async def raiz():
+    # La raíz no es parte de la API: lleva a la documentación interactiva
+    return RedirectResponse("/docs")
 
 
 @app.post("/tareas", status_code=status.HTTP_202_ACCEPTED)
